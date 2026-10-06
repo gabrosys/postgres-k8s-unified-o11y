@@ -1,0 +1,418 @@
+{
+  "uid": "pg-query-detail",
+  "title": "PostgreSQL Query Detail",
+  "tags": [
+    "postgresql",
+    "clickhouse"
+  ],
+  "timezone": "browser",
+  "time": {
+    "from": "now-1h",
+    "to": "now"
+  },
+  "refresh": "30s",
+  "schemaVersion": 39,
+  "links": [
+    {
+      "title": "All statements",
+      "type": "link",
+      "url": "/d/pg-unified-o11y/postgresql-unified-observability",
+      "keepTime": true,
+      "icon": "dashboard"
+    }
+  ],
+  "templating": {
+    "list": [
+      {
+        "name": "cluster",
+        "label": "PG Cluster",
+        "type": "query",
+        "datasource": {
+          "type": "grafana-clickhouse-datasource",
+          "uid": "clickhouse"
+        },
+        "query": "SELECT DISTINCT ResourceAttributes['k8s.namespace.name'] FROM otel.otel_metrics_gauge WHERE MetricName = 'cnpg_backends_total' AND ResourceAttributes['k8s.namespace.name'] != ''",
+        "refresh": 2,
+        "multi": true,
+        "includeAll": true,
+        "current": {
+          "text": "All",
+          "value": "$__all"
+        }
+      },
+      {
+        "name": "instance",
+        "label": "PG Instance",
+        "type": "query",
+        "datasource": {
+          "type": "grafana-clickhouse-datasource",
+          "uid": "clickhouse"
+        },
+        "query": "SELECT DISTINCT ResourceAttributes['k8s.pod.name'] FROM otel.otel_metrics_gauge WHERE MetricName = 'cnpg_backends_total' AND ResourceAttributes['k8s.namespace.name'] IN (${cluster:singlequote}) AND ResourceAttributes['k8s.pod.name'] != ''",
+        "refresh": 2,
+        "multi": true,
+        "includeAll": true,
+        "current": {
+          "text": "All",
+          "value": "$__all"
+        }
+      },
+      {
+        "name": "query_id",
+        "label": "query_id",
+        "type": "textbox",
+        "query": "",
+        "current": {
+          "text": "",
+          "value": ""
+        }
+      },
+      {
+        "name": "trace_id",
+        "label": "trace_id",
+        "type": "textbox",
+        "query": "",
+        "current": {
+          "text": "",
+          "value": ""
+        },
+        "hide": 2
+      }
+    ]
+  },
+  "panels": [
+    {
+      "type": "table",
+      "title": "Selected query",
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "clickhouse"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "clickhouse"
+          },
+          "editorType": "sql",
+          "format": 1,
+          "rawSql": "SELECT LogAttributes['query_id'] AS query_id,\n       any(LogAttributes['db.query.text']) AS query,\n       any(LogAttributes['db.name']) AS database,\n       count() AS calls,\n       round(avg(toFloat64OrZero(LogAttributes['duration_us'])) / 1000, 2) AS avg_ms,\n       round(quantile(0.99)(toFloat64OrZero(LogAttributes['duration_us'])) / 1000, 2) AS p99_ms\nFROM otel.otel_logs\nWHERE ServiceName = 'pg_stat_ch'\n  AND $__timeFilter(Timestamp) AND ResourceAttributes['k8s.namespace.name'] IN (${cluster:singlequote}) AND ResourceAttributes['k8s.pod.name'] IN (${instance:singlequote})\n  AND LogAttributes['query_id'] = '$query_id'\nGROUP BY query_id"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "No query_id selected: pick a statement on the main dashboard"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "query"
+            },
+            "properties": [
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "auto",
+                  "wrapText": true
+                }
+              },
+              {
+                "id": "custom.width",
+                "value": 700
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Selected query: avg latency ms",
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "clickhouse"
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 0,
+        "y": 13
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "clickhouse"
+          },
+          "editorType": "sql",
+          "format": 0,
+          "rawSql": "SELECT toStartOfInterval(Timestamp, INTERVAL 60 SECOND) AS time,\n       ResourceAttributes['k8s.namespace.name'] AS cluster, ResourceAttributes['k8s.pod.name'] AS instance,\n       avg(toFloat64OrZero(LogAttributes['duration_us'])) / 1000 AS avg_ms\nFROM otel.otel_logs\nWHERE ServiceName = 'pg_stat_ch' AND $__timeFilter(Timestamp)\n  AND ResourceAttributes['k8s.namespace.name'] IN (${cluster:singlequote}) AND ResourceAttributes['k8s.pod.name'] IN (${instance:singlequote})\n  AND ('$query_id' = '' OR LogAttributes['query_id'] = '$query_id')\nGROUP BY time, cluster, instance\nORDER BY time"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "displayName": "${__field.labels.cluster}/${__field.labels.instance}",
+          "unit": "ms"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Selected query: blocks read / sec",
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "clickhouse"
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 12,
+        "y": 13
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "clickhouse"
+          },
+          "editorType": "sql",
+          "format": 0,
+          "rawSql": "SELECT toStartOfInterval(Timestamp, INTERVAL 60 SECOND) AS time,\n       ResourceAttributes['k8s.namespace.name'] AS cluster, ResourceAttributes['k8s.pod.name'] AS instance,\n       sum(toFloat64OrZero(LogAttributes['shared_blks_read'])) / 60 AS blks_read_per_sec\nFROM otel.otel_logs\nWHERE ServiceName = 'pg_stat_ch' AND $__timeFilter(Timestamp)\n  AND ResourceAttributes['k8s.namespace.name'] IN (${cluster:singlequote}) AND ResourceAttributes['k8s.pod.name'] IN (${instance:singlequote})\n  AND ('$query_id' = '' OR LogAttributes['query_id'] = '$query_id')\nGROUP BY time, cluster, instance\nORDER BY time"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "displayName": "${__field.labels.cluster}/${__field.labels.instance}"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "type": "table",
+      "title": "Traces for $query_id",
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "clickhouse"
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 24,
+        "x": 0,
+        "y": 20
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "clickhouse"
+          },
+          "editorType": "sql",
+          "format": 1,
+          "rawSql": "SELECT TraceId AS trace,\n       min(Timestamp) AS started,\n       count() AS spans,\n       round(max(Duration) / 1e6, 2) AS total_ms\nFROM otel.otel_traces\nWHERE $__timeFilter(Timestamp) AND ResourceAttributes['k8s.namespace.name'] IN (${cluster:singlequote}) AND ResourceAttributes['k8s.pod.name'] IN (${instance:singlequote})\n  AND ('$query_id' = '' OR SpanAttributes['query.query_id'] = '$query_id')\nGROUP BY TraceId\nORDER BY total_ms DESC\nLIMIT 20"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "trace"
+            },
+            "properties": [
+              {
+                "id": "links",
+                "value": [
+                  {
+                    "title": "Open waterfall",
+                    "url": "/d/pg-query-detail/postgresql-query-detail?var-trace_id=${__value.raw}&var-query_id=$query_id&${cluster:queryparam}&${instance:queryparam}&${__url_time_range}",
+                    "targetBlank": false
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "type": "traces",
+      "title": "Trace waterfall",
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "clickhouse"
+      },
+      "gridPos": {
+        "h": 20,
+        "w": 24,
+        "x": 0,
+        "y": 27
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "clickhouse"
+          },
+          "editorType": "sql",
+          "format": 3,
+          "rawSql": "WITH '$trace_id' AS __gf_trace_id,\n     (SELECT min(Start) FROM otel.otel_traces_trace_id_ts\n       WHERE TraceId = __gf_trace_id) AS __gf_start,\n     (SELECT max(End) + 1 FROM otel.otel_traces_trace_id_ts\n       WHERE TraceId = __gf_trace_id) AS __gf_end\nSELECT TraceId AS traceID,\n       SpanId AS spanID,\n       ParentSpanId AS parentSpanID,\n       ServiceName AS serviceName,\n       SpanName AS operationName,\n       multiply(toUnixTimestamp64Nano(Timestamp), 0.000001) AS startTime,\n       multiply(Duration, 0.000001) AS duration,\n       arrayMap(k -> map('key', k, 'value', SpanAttributes[k]),\n                mapKeys(SpanAttributes)) AS tags,\n       arrayMap(k -> map('key', k, 'value', ResourceAttributes[k]),\n                mapKeys(ResourceAttributes)) AS serviceTags,\n       SpanAttributes['query.query_id'] AS queryId\nFROM otel.otel_traces\nWHERE TraceId = __gf_trace_id\n  AND Timestamp >= __gf_start\n  AND Timestamp <= __gf_end\nORDER BY startTime ASC",
+          "queryType": "traces",
+          "pluginVersion": "4.21.1"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "queryId"
+            },
+            "properties": [
+              {
+                "id": "links",
+                "value": [
+                  {
+                    "title": "Select this query_id",
+                    "url": "/d/pg-query-detail/postgresql-query-detail?var-query_id=${__value.raw}&${cluster:queryparam}&${instance:queryparam}&${__url_time_range}",
+                    "targetBlank": false
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "type": "table",
+      "title": "Logs for selected trace",
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "clickhouse"
+      },
+      "gridPos": {
+        "h": 9,
+        "w": 24,
+        "x": 0,
+        "y": 47
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "clickhouse"
+          },
+          "editorType": "sql",
+          "format": 1,
+          "rawSql": "SELECT Timestamp AS time,\n       SeverityText AS level,\n       ResourceAttributes['k8s.pod.name'] AS instance,\n       JSON_VALUE(Body, '$.command_tag') AS command,\n       JSON_VALUE(Body, '$.user_name') AS user,\n       toFloat64OrNull(extract(JSONExtractString(Body, 'message'), 'duration: ([0-9.]+) ms')) AS ms,\n       extract(JSONExtractString(Body, 'message'), 'ms  (parse|bind|execute)') AS phase,\n       LogAttributes['query_id'] AS query_id,\n       LogAttributes['sql_state_code'] AS sqlstate,\n       substring(JSONExtractString(Body, 'message'), 1, 200) AS message\nFROM otel.otel_logs\nWHERE ServiceName = 'postgres-server-log'\n  AND $__timeFilter(Timestamp)\n  AND '$trace_id' != '' AND position(Body, '$trace_id') > 0\nORDER BY Timestamp DESC\nLIMIT 100"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "message"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 600
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "type": "table",
+      "title": "Events",
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "clickhouse"
+      },
+      "gridPos": {
+        "h": 9,
+        "w": 12,
+        "x": 0,
+        "y": 4
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "clickhouse"
+          },
+          "editorType": "sql",
+          "format": 1,
+          "rawSql": "SELECT Timestamp AS time,\n       round(toFloat64OrZero(LogAttributes['duration_us']) / 1000, 3) AS ms,\n       LogAttributes['rows'] AS rows_returned,\n       LogAttributes['shared_blks_hit'] AS blks_hit,\n       LogAttributes['shared_blks_read'] AS blks_read,\n       LogAttributes['parallel_workers_launched'] AS workers,\n       ResourceAttributes['k8s.namespace.name'] AS cluster, ResourceAttributes['k8s.pod.name'] AS instance\nFROM otel.otel_logs\nWHERE ServiceName = 'pg_stat_ch'\n  AND $__timeFilter(Timestamp)\n  AND ResourceAttributes['k8s.namespace.name'] IN (${cluster:singlequote}) AND ResourceAttributes['k8s.pod.name'] IN (${instance:singlequote})\n  AND ('$query_id' = '' OR LogAttributes['query_id'] = '$query_id')\nORDER BY Timestamp DESC\nLIMIT 100"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      }
+    },
+    {
+      "type": "table",
+      "title": "Logs",
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "clickhouse"
+      },
+      "gridPos": {
+        "h": 9,
+        "w": 12,
+        "x": 12,
+        "y": 4
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "clickhouse"
+          },
+          "editorType": "sql",
+          "format": 1,
+          "rawSql": "SELECT Timestamp AS time,\n       SeverityText AS level,\n       ResourceAttributes['k8s.pod.name'] AS instance,\n       JSON_VALUE(Body, '$.command_tag') AS command,\n       JSON_VALUE(Body, '$.user_name') AS user,\n       toFloat64OrNull(extract(JSONExtractString(Body, 'message'), 'duration: ([0-9.]+) ms')) AS ms,\n       extract(JSONExtractString(Body, 'message'), 'ms  (parse|bind|execute)') AS phase,\n       LogAttributes['query_id'] AS query_id,\n       LogAttributes['sql_state_code'] AS sqlstate,\n       substring(JSONExtractString(Body, 'message'), 1, 200) AS message\nFROM otel.otel_logs\nWHERE ServiceName = 'postgres-server-log'\n  AND $__timeFilter(Timestamp)\n  AND ResourceAttributes['k8s.namespace.name'] IN (${cluster:singlequote}) AND ResourceAttributes['k8s.pod.name'] IN (${instance:singlequote})\n  AND ('$query_id' = '' OR LogAttributes['query_id'] = '$query_id')\nORDER BY Timestamp DESC\nLIMIT 100"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "message"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 600
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}

@@ -1,0 +1,117 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: otel-agent-config
+  namespace: o11y
+data:
+  agent.yaml: |
+    receivers:
+      file_log:
+        include: [/var/log/pods/pg-*_*/postgres/*.log]
+        start_at: end
+        # Required by the container operator.
+        include_file_path: true
+        operators:
+          - type: container
+
+          - type: json_parser
+            parse_from: body
+            parse_to: body
+
+          - type: filter
+            expr: 'body.logger != "postgres"'
+
+          - type: move
+            from: body.record
+            to: body
+
+          - type: filter
+            expr: 'body.application_name != nil and body.application_name matches "^cnpg"'
+
+          - type: time_parser
+            parse_from: body.log_time
+            layout_type: gotime
+            layout: '2006-01-02 15:04:05.000 MST'
+
+          - type: severity_parser
+            parse_from: body.error_severity
+            mapping:
+              debug: [DEBUG1, DEBUG2, DEBUG3, DEBUG4, DEBUG5]
+              info: [INFO, LOG, NOTICE]
+              warn: WARNING
+              error: ERROR
+              fatal: [FATAL, PANIC]
+
+          - type: copy
+            from: body.query_id
+            to: attributes.query_id
+          - type: copy
+            from: body.sql_state_code
+            to: attributes.sql_state_code
+          - type: copy
+            from: body.backend_type
+            to: attributes.backend_type
+
+    processors:
+      batch:
+        timeout: 2s
+      resource:
+        attributes:
+          - key: service.name
+            value: postgres-server-log
+            action: upsert
+
+    exporters:
+      otlp_grpc:
+        endpoint: otel-collector.o11y.svc.cluster.local:4317
+        tls:
+          insecure: true
+
+    service:
+      pipelines:
+        logs:
+          receivers: [file_log]
+          processors: [resource, batch]
+          exporters: [otlp_grpc]
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: otel-agent
+  namespace: o11y
+  labels:
+    app.kubernetes.io/name: otel-agent
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: otel-agent
+  template:
+    metadata:
+      annotations:
+        config-hash: __CONFIG_HASH__
+      labels:
+        app.kubernetes.io/name: otel-agent
+    spec:
+      # Node log files are root-owned.
+      securityContext:
+        runAsUser: 0
+      tolerations:
+        - key: node-role.kubernetes.io/control-plane
+          effect: NoSchedule
+      containers:
+        - name: agent
+          image: __OTEL_COLLECTOR_IMAGE__
+          args: ["--config=/conf/agent.yaml"]
+          volumeMounts:
+            - name: config
+              mountPath: /conf
+            - name: varlogpods
+              mountPath: /var/log/pods
+              readOnly: true
+      volumes:
+        - name: config
+          configMap:
+            name: otel-agent-config
+        - name: varlogpods
+          hostPath:
+            path: /var/log/pods

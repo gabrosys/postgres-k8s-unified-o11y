@@ -1,0 +1,51 @@
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: __CLUSTER__
+spec:
+  instances: 1
+
+  imageCatalogRef:
+    apiGroup: postgresql.cnpg.io
+    kind: ClusterImageCatalog
+    name: o11y-postgres
+    major: 18
+
+  imagePullPolicy: IfNotPresent
+
+  # The CPU limit is the denominator for container CPU usage.
+  resources:
+    requests:
+      cpu: 500m
+      memory: 512Mi
+    limits:
+      cpu: "1"
+      memory: 1Gi
+
+  postgresql:
+    shared_preload_libraries:
+      - pg_tracing
+      - pg_stat_ch
+    parameters:
+      compute_query_id: "on"
+      track_io_timing: "on"
+      # Log every statement so each one carries a query_id.
+      log_min_duration_statement: "0"
+
+      pg_tracing.otel_endpoint: "http://otel-collector.o11y.svc.cluster.local:4318/v1/traces"
+      pg_tracing.otel_naptime: "2000"
+      pg_tracing.sample_rate: "0.01"
+
+      pg_stat_ch.use_otel: "on"
+      pg_stat_ch.otel_endpoint: "otel-collector.o11y.svc.cluster.local:4317"
+
+  bootstrap:
+    initdb:
+      database: demo
+      owner: demo
+      postInitApplicationSQL:
+        - CREATE EXTENSION IF NOT EXISTS pg_tracing
+        - CREATE EXTENSION IF NOT EXISTS pg_stat_ch
+
+  storage:
+    size: 2Gi

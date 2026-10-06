@@ -1,0 +1,23 @@
+apiVersion: 1
+datasources:
+  - name: ClickHouse
+    uid: clickhouse
+    type: grafana-clickhouse-datasource
+    isDefault: true
+    jsonData:
+      host: clickhouse.o11y.svc.cluster.local
+      port: 9000
+      protocol: native
+      username: default
+      defaultDatabase: otel
+      # The plugin identifies OTel schema 1.3.0 as "1.30.0".
+      logs:
+        defaultDatabase: otel
+        defaultTable: otel_logs
+        otelEnabled: true
+        otelVersion: "1.30.0"
+      traces:
+        defaultDatabase: otel
+        defaultTable: otel_traces
+        otelEnabled: true
+        otelVersion: "1.30.0"

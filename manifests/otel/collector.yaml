@@ -1,0 +1,155 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: otel-collector-config
+  namespace: o11y
+data:
+  collector.yaml: |
+    receivers:
+      otlp:
+        protocols:
+          grpc:
+            endpoint: 0.0.0.0:4317
+          http:
+            endpoint: 0.0.0.0:4318
+
+      prometheus:
+        config:
+          scrape_configs:
+            - job_name: cnpg
+              scrape_interval: 30s
+              kubernetes_sd_configs:
+                - role: pod
+              relabel_configs:
+                - source_labels: [__meta_kubernetes_pod_label_cnpg_io_podRole]
+                  action: keep
+                  regex: instance
+                - source_labels: [__meta_kubernetes_pod_container_port_name]
+                  action: keep
+                  regex: metrics
+
+            - job_name: cadvisor
+              scrape_interval: 60s
+              scheme: https
+              authorization:
+                credentials_file: /var/run/secrets/kubernetes.io/serviceaccount/token
+              tls_config:
+                insecure_skip_verify: true
+              kubernetes_sd_configs:
+                - role: node
+              relabel_configs:
+                - target_label: __address__
+                  replacement: kubernetes.default.svc:443
+                - source_labels: [__meta_kubernetes_node_name]
+                  regex: (.+)
+                  target_label: __metrics_path__
+                  replacement: /api/v1/nodes/$$1/proxy/metrics/cadvisor
+              metric_relabel_configs:
+                - source_labels: [__name__]
+                  action: keep
+                  regex: container_(cpu|memory)_.*
+                - source_labels: [namespace]
+                  action: keep
+                  regex: (o11y|pg-.*)
+
+    processors:
+      batch:
+        timeout: 2s
+
+      # pg_stat_ch and pg_tracing identify themselves only by connection;
+      # resolve namespace and pod from the source IP.
+      k8sattributes:
+        auth_type: serviceAccount
+        extract:
+          metadata: [k8s.namespace.name, k8s.pod.name]
+        pod_association:
+          - sources:
+              - from: resource_attribute
+                name: k8s.pod.uid
+          - sources:
+              - from: connection
+
+      filter/cnpg_internal:
+        error_mode: ignore
+        logs:
+          log_record:
+            - 'attributes["app"] == "cnpg_metrics_exporter"'
+            - 'attributes["app"] == "cnpg-instance-manager"'
+
+    exporters:
+      clickhouse:
+        endpoint: tcp://clickhouse.o11y.svc.cluster.local:9000
+        database: otel
+        create_schema: true
+        ttl: 0
+        async_insert: true
+
+    service:
+      pipelines:
+        traces:
+          receivers: [otlp]
+          processors: [k8sattributes, batch]
+          exporters: [clickhouse]
+        logs:
+          receivers: [otlp]
+          processors: [k8sattributes, filter/cnpg_internal, batch]
+          exporters: [clickhouse]
+        metrics:
+          receivers: [prometheus]
+          processors: [batch]
+          exporters: [clickhouse]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: otel-collector
+  namespace: o11y
+  labels:
+    app.kubernetes.io/name: otel-collector
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: otel-collector
+  template:
+    metadata:
+      annotations:
+        config-hash: __CONFIG_HASH__
+      labels:
+        app.kubernetes.io/name: otel-collector
+    spec:
+      serviceAccountName: otel-collector
+      containers:
+        - name: collector
+          image: __OTEL_COLLECTOR_IMAGE__
+          args: ["--config=/conf/collector.yaml"]
+          ports:
+            - name: otlp-grpc
+              containerPort: 4317
+            - name: otlp-http
+              containerPort: 4318
+          volumeMounts:
+            - name: config
+              mountPath: /conf
+      volumes:
+        - name: config
+          configMap:
+            name: otel-collector-config
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: otel-collector
+  namespace: o11y
+  labels:
+    app.kubernetes.io/name: otel-collector
+spec:
+  selector:
+    app.kubernetes.io/name: otel-collector
+  ports:
+    - name: otlp-grpc
+      port: 4317
+      targetPort: 4317
+    - name: otlp-http
+      port: 4318
+      targetPort: 4318

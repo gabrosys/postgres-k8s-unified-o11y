@@ -1,0 +1,41 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: pgload
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: pgload
+  template:
+    metadata:
+      labels:
+        app: pgload
+      annotations:
+        source-hash: __SOURCE_HASH__
+    spec:
+      containers:
+        - name: pgload
+          image: __PGLOAD_IMAGE__
+          imagePullPolicy: Never
+          env:
+            - name: PGHOST
+              value: __CLUSTER__-rw
+            - name: PGPORT
+              valueFrom:
+                secretKeyRef: { name: __CLUSTER__-app, key: port }
+            - name: PGDATABASE
+              valueFrom:
+                secretKeyRef: { name: __CLUSTER__-app, key: dbname }
+            - name: PGUSER
+              valueFrom:
+                secretKeyRef: { name: __CLUSTER__-app, key: username }
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef: { name: __CLUSTER__-app, key: password }
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              value: http://otel-collector.o11y.svc.cluster.local:4318
+            - name: OTEL_SERVICE_NAME
+              value: pgload
+            - name: RATE_PER_SEC
+              value: "3"

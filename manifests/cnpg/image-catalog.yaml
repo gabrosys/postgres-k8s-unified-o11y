@@ -1,0 +1,8 @@
+apiVersion: postgresql.cnpg.io/v1
+kind: ClusterImageCatalog
+metadata:
+  name: o11y-postgres
+spec:
+  images:
+    - major: 18
+      image: __PG_IMAGE__
