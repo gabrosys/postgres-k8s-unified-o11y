@@ -22,7 +22,7 @@ import (
 	"go.opentelemetry.io/otel/trace"
 )
 
-const seedRows = 200000
+const seedRows = 1500000
 
 var tracer trace.Tracer
 
