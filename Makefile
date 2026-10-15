@@ -1,4 +1,4 @@
-.PHONY: help prereqs kind cnpg build-image clickhouse otel pg-cluster workload grafana smoke chaos-degrade chaos-restore setup-all teardown collector-logs agent-logs ch-logs ch-client
+.PHONY: help prereqs kind cnpg build-image clickhouse otel pg-cluster workload grafana smoke chaos-degrade chaos-restore top-queries timeline drill setup-all teardown collector-logs agent-logs ch-logs ch-client
 
 SHELL := /bin/bash
 SCRIPTS_DIR := scripts
@@ -44,6 +44,15 @@ chaos-degrade: ## Drop the lookup index to force a plan regression
 
 chaos-restore: ## Recreate the lookup index and re-analyze
 	@$(SCRIPTS_DIR)/chaos-restore.sh
+
+top-queries: ## Rank statements by total time (PG_CLUSTER, WINDOW_MIN)
+	@$(SCRIPTS_DIR)/correlate.sh top
+
+timeline: ## Per-minute events + metrics + traces for QUERY_ID=<id>
+	@$(SCRIPTS_DIR)/correlate.sh timeline
+
+drill: ## Spans + server log of TRACE_ID=<id> (or slowest trace of QUERY_ID=<id>)
+	@$(SCRIPTS_DIR)/correlate.sh drill
 
 setup-all: ## Run full setup
 	@$(SCRIPTS_DIR)/setup-all.sh

@@ -200,14 +200,14 @@
     },
     {
       "type": "table",
-      "title": "Traces for $query_id",
+      "title": "Slowest traces",
       "datasource": {
         "type": "grafana-clickhouse-datasource",
         "uid": "clickhouse"
       },
       "gridPos": {
         "h": 7,
-        "w": 24,
+        "w": 12,
         "x": 0,
         "y": 20
       },
@@ -221,6 +221,55 @@
           "editorType": "sql",
           "format": 1,
           "rawSql": "SELECT TraceId AS trace,\n       min(Timestamp) AS started,\n       count() AS spans,\n       round(max(Duration) / 1e6, 2) AS total_ms\nFROM otel.otel_traces\nWHERE $__timeFilter(Timestamp) AND ResourceAttributes['k8s.namespace.name'] IN (${cluster:singlequote}) AND ResourceAttributes['k8s.pod.name'] IN (${instance:singlequote})\n  AND ('$query_id' = '' OR SpanAttributes['query.query_id'] = '$query_id')\nGROUP BY TraceId\nORDER BY total_ms DESC\nLIMIT 20"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "trace"
+            },
+            "properties": [
+              {
+                "id": "links",
+                "value": [
+                  {
+                    "title": "Open waterfall",
+                    "url": "/d/pg-query-detail/postgresql-query-detail?var-trace_id=${__value.raw}&var-query_id=$query_id&${cluster:queryparam}&${instance:queryparam}&${__url_time_range}",
+                    "targetBlank": false
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "type": "table",
+      "title": "Latest traces",
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "clickhouse"
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 12,
+        "y": 20
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "clickhouse"
+          },
+          "editorType": "sql",
+          "format": 1,
+          "rawSql": "SELECT TraceId AS trace,\n       min(Timestamp) AS started,\n       count() AS spans,\n       round(max(Duration) / 1e6, 2) AS total_ms\nFROM otel.otel_traces\nWHERE $__timeFilter(Timestamp) AND ResourceAttributes['k8s.namespace.name'] IN (${cluster:singlequote}) AND ResourceAttributes['k8s.pod.name'] IN (${instance:singlequote})\n  AND ('$query_id' = '' OR SpanAttributes['query.query_id'] = '$query_id')\nGROUP BY TraceId\nORDER BY started DESC\nLIMIT 20"
         }
       ],
       "fieldConfig": {
