@@ -1,0 +1,46 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: clickhouse-schema
+spec:
+  backoffLimit: 20
+  template:
+    spec:
+      restartPolicy: OnFailure
+      initContainers:
+        - name: database
+          image: clickhouse/clickhouse-server:26.7.5.10
+          command: [bash, /scripts/database.sh]
+          env:
+            - {name: CH_HOST, value: clickhouse-otel}
+            - {name: CH_HOSTS, value: "0"}
+            - &password
+              name: CH_PASSWORD
+              valueFrom:
+                secretKeyRef: {name: clickhouse-credentials, key: migrate}
+          volumeMounts:
+            - {name: scripts, mountPath: /scripts}
+        - name: migrate
+          image: migrate/migrate:v4.20.1
+          command: [sh, /scripts/migrate.sh]
+          env:
+            - *password
+          volumeMounts:
+            - {name: migrations, mountPath: /migrations}
+            - {name: scripts, mountPath: /scripts}
+      containers:
+        - name: retention
+          image: clickhouse/clickhouse-server:26.7.5.10
+          command: [bash, /scripts/retention.sh]
+          env:
+            - {name: CH_HOST, value: clickhouse-otel}
+            - *password
+          envFrom:
+            - configMapRef: {name: clickhouse-retention}
+          volumeMounts:
+            - {name: scripts, mountPath: /scripts}
+      volumes:
+        - name: migrations
+          configMap: {name: clickhouse-migrations}
+        - name: scripts
+          configMap: {name: clickhouse-schema-scripts}

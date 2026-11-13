@@ -1,20 +1,19 @@
 #!/usr/bin/env bash
 
-# A bind parameter, as the workload sends it. A literal in place of $1 yields a
-# different query id than the one the pipeline records.
-EXPLAIN_LOOKUP="SET plan_cache_mode = force_generic_plan;
-PREPARE lookup(text) AS
-  SELECT id, kind, amount FROM pgload_events WHERE ext_id = \$1;
-EXPLAIN (VERBOSE, COSTS OFF) EXECUTE lookup('ext-12345')"
+# The regression is a planner override left in the Cluster spec. CNPG reloads it:
+# plans change, query ids do not.
+OVERRIDE='{"enable_indexscan":"off","enable_bitmapscan":"off"}'
 
-# Runs SQL on every cluster, then prints the lookup plan and its query identifier.
-chaos_apply() {
-  local label="$1" sql="$2" cluster
+show_planner() {
+  PG_CLUSTER="$1" pg_psql -tAc "SELECT name || ' = ' || setting FROM pg_settings
+    WHERE name IN ('enable_indexscan', 'enable_bitmapscan') ORDER BY name"
+}
 
-  for cluster in "${CLUSTERS[@]}"; do
-    printf '=== %s: %s ===\n' "$cluster" "$label"
-    PG_CLUSTER="$cluster" pg_psql -q -c "$sql"
-    PG_CLUSTER="$cluster" pg_psql -tAc "$EXPLAIN_LOOKUP" \
-      | grep -Ei 'scan|query identifier'
+# Waits until every instance of the cluster reports enable_indexscan = $2.
+wait_planner() {
+  local deadline=$((SECONDS + 120))
+  until [ "$(PG_CLUSTER="$1" pg_psql -tAc "SHOW enable_indexscan")" = "$2" ]; do
+    [ "$SECONDS" -lt "$deadline" ] || { echo "error: $1 did not reload" >&2; return 1; }
+    sleep 3
   done
 }

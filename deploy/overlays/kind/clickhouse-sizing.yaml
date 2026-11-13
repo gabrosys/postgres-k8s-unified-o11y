@@ -1,0 +1,11 @@
+- op: replace
+  path: /spec/templates/podTemplates/0/spec/containers/0/resources
+  value:
+    requests:
+      cpu: 200m
+      memory: 512Mi
+    limits:
+      memory: 2Gi
+- op: replace
+  path: /spec/templates/volumeClaimTemplates/0/spec/resources/requests/storage
+  value: 5Gi

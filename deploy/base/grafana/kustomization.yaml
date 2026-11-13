@@ -1,0 +1,18 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: o11y
+resources:
+  - deployment.yaml
+  - service.yaml
+configMapGenerator:
+  - name: grafana-datasources
+    files:
+      - datasource.yaml
+  - name: grafana-dashboard-providers
+    files:
+      - provider.yaml
+  - name: grafana-dashboards
+    files:
+      - dashboards/pg-unified.json
+      - dashboards/pg-query-detail.json
+      - dashboards/pipeline-health.json

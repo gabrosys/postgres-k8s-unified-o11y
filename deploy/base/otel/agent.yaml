@@ -1,0 +1,122 @@
+apiVersion: opentelemetry.io/v1beta1
+kind: OpenTelemetryCollector
+metadata:
+  name: otel-agent
+spec:
+  mode: daemonset
+  # Node log files are root-owned.
+  podSecurityContext:
+    runAsUser: 0
+  tolerations:
+    - key: node-role.kubernetes.io/control-plane
+      effect: NoSchedule
+  observability:
+    metrics:
+      enableMetrics: true
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      memory: 256Mi
+  env:
+    - name: GOMEMLIMIT
+      value: 200MiB
+  volumes:
+    - name: varlogpods
+      hostPath:
+        path: /var/log/pods
+    - name: state
+      hostPath:
+        path: /var/lib/otelcol-agent
+        type: DirectoryOrCreate
+  volumeMounts:
+    - name: varlogpods
+      mountPath: /var/log/pods
+      readOnly: true
+    - name: state
+      mountPath: /var/lib/otelcol
+  config:
+    extensions:
+      health_check:
+        endpoint: 0.0.0.0:13133
+      file_storage:
+        directory: /var/lib/otelcol
+
+    receivers:
+      file_log:
+        include: [/var/log/pods/pg-*_*/postgres/*.log]
+        start_at: end
+        storage: file_storage
+        include_file_path: true
+        operators:
+          - type: container
+
+          - type: json_parser
+            parse_from: body
+            parse_to: body
+
+          - type: filter
+            expr: 'body.logger != "postgres"'
+
+          - type: move
+            from: body.record
+            to: body
+
+          - type: filter
+            expr: 'body.application_name != nil and body.application_name matches "^cnpg"'
+
+          - type: time_parser
+            parse_from: body.log_time
+            layout_type: gotime
+            layout: '2006-01-02 15:04:05.000 MST'
+
+          - type: severity_parser
+            parse_from: body.error_severity
+            mapping:
+              debug: [DEBUG1, DEBUG2, DEBUG3, DEBUG4, DEBUG5]
+              info: [INFO, LOG, NOTICE]
+              warn: WARNING
+              error: ERROR
+              fatal: [FATAL, PANIC]
+
+          - type: copy
+            from: body.query_id
+            to: attributes.query_id
+          - type: copy
+            from: body.sql_state_code
+            to: attributes.sql_state_code
+          - type: copy
+            from: body.backend_type
+            to: attributes.backend_type
+
+    processors:
+      memory_limiter:
+        check_interval: 1s
+        limit_percentage: 80
+        spike_limit_percentage: 20
+      resource:
+        attributes:
+          - key: service.name
+            value: postgres-server-log
+            action: upsert
+
+    exporters:
+      otlp_grpc:
+        # Through the ClusterIP Service every connection would stick to one gateway.
+        endpoint: dns:///otel-gateway-collector-headless.o11y.svc:4317
+        balancer_name: round_robin
+        tls:
+          insecure: true
+        retry_on_failure:
+          max_elapsed_time: 0
+        sending_queue:
+          storage: file_storage
+
+    service:
+      extensions: [health_check, file_storage]
+      pipelines:
+        logs:
+          receivers: [file_log]
+          processors: [memory_limiter, resource]
+          exporters: [otlp_grpc]

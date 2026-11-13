@@ -1,0 +1,125 @@
+apiVersion: opentelemetry.io/v1beta1
+kind: OpenTelemetryCollector
+metadata:
+  name: otel-gateway
+spec:
+  mode: statefulset
+  replicas: 2
+  podDisruptionBudget:
+    maxUnavailable: 1
+  affinity:
+    podAntiAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+        - topologyKey: kubernetes.io/hostname
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: otel-gateway-collector
+  observability:
+    metrics:
+      enableMetrics: true
+  resources:
+    requests:
+      cpu: 200m
+      memory: 512Mi
+    limits:
+      memory: 1Gi
+  env:
+    - name: GOMEMLIMIT
+      value: 800MiB
+    - name: CLICKHOUSE_PASSWORD
+      valueFrom:
+        secretKeyRef: {name: clickhouse-credentials, key: ingest}
+  volumeClaimTemplates:
+    - metadata:
+        name: queue
+      spec:
+        accessModes: [ReadWriteOnce]
+        resources:
+          requests:
+            storage: 5Gi
+  volumeMounts:
+    - name: queue
+      mountPath: /var/lib/otelcol/queue
+  config:
+    extensions:
+      health_check:
+        endpoint: 0.0.0.0:13133
+      file_storage/queue:
+        directory: /var/lib/otelcol/queue
+
+    receivers:
+      otlp:
+        protocols:
+          grpc:
+            endpoint: 0.0.0.0:4317
+            # Clients re-resolve the gateways only when a connection closes.
+            keepalive:
+              server_parameters:
+                max_connection_age: 2m
+                max_connection_age_grace: 30s
+          http:
+            endpoint: 0.0.0.0:4318
+
+    processors:
+      memory_limiter:
+        check_interval: 1s
+        limit_percentage: 80
+        spike_limit_percentage: 20
+
+      # pg_stat_ch and pg_tracing send no pod identity; resolve it from the source IP.
+      k8s_attributes:
+        auth_type: serviceAccount
+        extract:
+          metadata: [k8s.namespace.name, k8s.pod.name]
+        pod_association:
+          - sources:
+              - from: resource_attribute
+                name: k8s.pod.uid
+          - sources:
+              - from: connection
+
+      filter/cnpg_internal:
+        error_mode: ignore
+        logs:
+          log_record:
+            - 'attributes["app"] == "cnpg_metrics_exporter"'
+            - 'attributes["app"] == "cnpg-instance-manager"'
+
+    exporters:
+      clickhouse:
+        endpoint: tcp://clickhouse-otel.o11y.svc:9000
+        username: ingest
+        password: ${env:CLICKHOUSE_PASSWORD}
+        database: otel
+        create_schema: false
+        async_insert: false
+        retry_on_failure:
+          enabled: true
+          max_elapsed_time: 0
+        sending_queue:
+          enabled: true
+          storage: file_storage/queue
+          num_consumers: 4
+          sizer: items
+          queue_size: 1000000
+          batch:
+            flush_timeout: 5s
+            min_size: 5000
+            max_size: 50000
+
+    service:
+      extensions: [health_check, file_storage/queue]
+      pipelines:
+        traces:
+          receivers: [otlp]
+          processors: [memory_limiter, k8s_attributes]
+          exporters: [clickhouse]
+        logs:
+          receivers: [otlp]
+          processors: [memory_limiter, k8s_attributes, filter/cnpg_internal]
+          exporters: [clickhouse]
+        # Scraped metrics already carry their target's identity.
+        metrics:
+          receivers: [otlp]
+          processors: [memory_limiter]
+          exporters: [clickhouse]

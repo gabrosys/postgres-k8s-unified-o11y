@@ -1,6 +1,4 @@
--- What: ranks the statements on __NS__ by total database time over the last __MIN__ minutes,
--- using the pg_stat_ch query events.
--- Why: it shows which query costs the most, and gives you the query_id to pass to timeline.
+-- Statements ranked by total time, from pg_stat_ch events.
 SELECT query_id,
        count() AS calls,
        round(sum(d) / 1e6, 2) AS total_s,

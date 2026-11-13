@@ -1,0 +1,426 @@
+{
+  "uid": "pipeline-health",
+  "title": "Pipeline Health",
+  "tags": [
+    "opentelemetry",
+    "clickhouse"
+  ],
+  "timezone": "browser",
+  "time": {
+    "from": "now-1h",
+    "to": "now"
+  },
+  "refresh": "30s",
+  "schemaVersion": 39,
+  "links": [],
+  "templating": {
+    "list": []
+  },
+  "panels": [
+    {
+      "type": "row",
+      "title": "Collectors",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "panels": []
+    },
+    {
+      "type": "timeseries",
+      "title": "Exporter queue size",
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "clickhouse"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 1
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "clickhouse"
+          },
+          "editorType": "sql",
+          "format": 0,
+          "rawSql": "SELECT toStartOfInterval(TimeUnix, INTERVAL 60 SECOND) AS time, concat(ResourceAttributes['k8s.pod.name'], ' ', Attributes['data_type']) AS series, max(Value) AS value\nFROM otel.otel_metrics_gauge\nWHERE MetricName = 'otelcol_exporter_queue_size' AND bitAnd(Flags, 1) = 0 AND $__timeFilter(TimeUnix)\nGROUP BY time, series\nORDER BY time"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "displayName": "${__field.labels.series}"
+        },
+        "overrides": []
+      },
+      "description": "Batches waiting in each exporter's sending queue. Grows while the next hop is down, drains after."
+    },
+    {
+      "type": "timeseries",
+      "title": "Refused by receivers / min",
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "clickhouse"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 1
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "clickhouse"
+          },
+          "editorType": "sql",
+          "format": 0,
+          "rawSql": "SELECT time, series, sum(if(delta < 0, Value, delta)) AS value\nFROM (\n  SELECT toStartOfInterval(TimeUnix, INTERVAL 60 SECOND) AS time, Value, concat(ResourceAttributes['k8s.pod.name'], ' ', replaceOne(MetricName, 'otelcol_receiver_refused_', '')) AS series,\n         Value - lagInFrame(Value, 1, Value) OVER (PARTITION BY MetricName, ResourceAttributes, Attributes ORDER BY TimeUnix\n                                                  ROWS BETWEEN 1 PRECEDING AND CURRENT ROW) AS delta\n  FROM otel.otel_metrics_sum\n  WHERE MetricName LIKE 'otelcol_receiver_refused_%' AND bitAnd(Flags, 1) = 0 AND $__timeFilter(TimeUnix))\nGROUP BY time, series\nORDER BY time"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "displayName": "${__field.labels.series}"
+        },
+        "overrides": []
+      },
+      "description": "Items rejected at the receiver, usually by the memory limiter. Senders retry them."
+    },
+    {
+      "type": "timeseries",
+      "title": "Send failed / min",
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "clickhouse"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 1
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "clickhouse"
+          },
+          "editorType": "sql",
+          "format": 0,
+          "rawSql": "SELECT time, series, sum(if(delta < 0, Value, delta)) AS value\nFROM (\n  SELECT toStartOfInterval(TimeUnix, INTERVAL 60 SECOND) AS time, Value, concat(ResourceAttributes['k8s.pod.name'], ' ', replaceOne(MetricName, 'otelcol_exporter_send_failed_', '')) AS series,\n         Value - lagInFrame(Value, 1, Value) OVER (PARTITION BY MetricName, ResourceAttributes, Attributes ORDER BY TimeUnix\n                                                  ROWS BETWEEN 1 PRECEDING AND CURRENT ROW) AS delta\n  FROM otel.otel_metrics_sum\n  WHERE MetricName LIKE 'otelcol_exporter_send_failed_%' AND bitAnd(Flags, 1) = 0 AND $__timeFilter(TimeUnix))\nGROUP BY time, series\nORDER BY time"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "displayName": "${__field.labels.series}"
+        },
+        "overrides": []
+      },
+      "description": "Items dropped after the exporter gave up. Retries never expire here, so only permanent errors count. Empty means none."
+    },
+    {
+      "type": "timeseries",
+      "title": "Gateway accepted vs sent / min",
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "clickhouse"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 9
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "clickhouse"
+          },
+          "editorType": "sql",
+          "format": 0,
+          "rawSql": "SELECT time, series, sum(if(delta < 0, Value, delta)) AS value\nFROM (\n  SELECT toStartOfInterval(TimeUnix, INTERVAL 60 SECOND) AS time, Value, if(MetricName LIKE 'otelcol_receiver_%', concat('accepted ', replaceOne(MetricName, 'otelcol_receiver_accepted_', '')), concat('sent ', replaceOne(MetricName, 'otelcol_exporter_sent_', ''))) AS series,\n         Value - lagInFrame(Value, 1, Value) OVER (PARTITION BY MetricName, ResourceAttributes, Attributes ORDER BY TimeUnix\n                                                  ROWS BETWEEN 1 PRECEDING AND CURRENT ROW) AS delta\n  FROM otel.otel_metrics_sum\n  WHERE ResourceAttributes['k8s.pod.name'] LIKE 'otel-gateway-%' AND (MetricName LIKE 'otelcol_receiver_accepted_%' OR MetricName LIKE 'otelcol_exporter_sent_%') AND bitAnd(Flags, 1) = 0 AND $__timeFilter(TimeUnix))\nGROUP BY time, series\nORDER BY time"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "displayName": "${__field.labels.series}"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "type": "row",
+      "title": "ClickHouse",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 17
+      },
+      "panels": []
+    },
+    {
+      "type": "timeseries",
+      "title": "Parts",
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "clickhouse"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 18
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "clickhouse"
+          },
+          "editorType": "sql",
+          "format": 0,
+          "rawSql": "SELECT toStartOfInterval(TimeUnix, INTERVAL 60 SECOND) AS time, concat(ResourceAttributes['k8s.pod.name'], ' ', replaceRegexpOne(MetricName, '^ClickHouse[A-Za-z]+_', '')) AS series, max(Value) AS value\nFROM otel.otel_metrics_gauge\nWHERE MetricName IN ('ClickHouseAsyncMetrics_MaxPartCountForPartition', 'ClickHouseMetrics_PartsActive') AND bitAnd(Flags, 1) = 0 AND $__timeFilter(TimeUnix)\nGROUP BY time, series\nORDER BY time"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "displayName": "${__field.labels.series}"
+        },
+        "overrides": []
+      },
+      "description": "MaxPartCountForPartition approaching parts_to_delay_insert (1000 by default) means inserts are too small or merges lag."
+    },
+    {
+      "type": "timeseries",
+      "title": "Insert errors / min",
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "clickhouse"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 18
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "clickhouse"
+          },
+          "editorType": "sql",
+          "format": 0,
+          "rawSql": "SELECT time, series, sum(if(delta < 0, Value, delta)) AS value\nFROM (\n  SELECT toStartOfInterval(TimeUnix, INTERVAL 60 SECOND) AS time, Value, concat(ResourceAttributes['k8s.pod.name'], ' ', replaceOne(MetricName, 'ClickHouseProfileEvents_', '')) AS series,\n         Value - lagInFrame(Value, 1, Value) OVER (PARTITION BY MetricName, ResourceAttributes, Attributes ORDER BY TimeUnix\n                                                  ROWS BETWEEN 1 PRECEDING AND CURRENT ROW) AS delta\n  FROM otel.otel_metrics_sum\n  WHERE MetricName IN ('ClickHouseProfileEvents_FailedInsertQuery', 'ClickHouseProfileEvents_RejectedInserts', 'ClickHouseProfileEvents_DelayedInserts') AND bitAnd(Flags, 1) = 0 AND $__timeFilter(TimeUnix))\nGROUP BY time, series\nORDER BY time"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "displayName": "${__field.labels.series}"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Inserts / min",
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "clickhouse"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 18
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "clickhouse"
+          },
+          "editorType": "sql",
+          "format": 0,
+          "rawSql": "SELECT time, series, sum(if(delta < 0, Value, delta)) AS value\nFROM (\n  SELECT toStartOfInterval(TimeUnix, INTERVAL 60 SECOND) AS time, Value, ResourceAttributes['k8s.pod.name'] AS series,\n         Value - lagInFrame(Value, 1, Value) OVER (PARTITION BY MetricName, ResourceAttributes, Attributes ORDER BY TimeUnix\n                                                  ROWS BETWEEN 1 PRECEDING AND CURRENT ROW) AS delta\n  FROM otel.otel_metrics_sum\n  WHERE MetricName = 'ClickHouseProfileEvents_InsertQuery' AND bitAnd(Flags, 1) = 0 AND $__timeFilter(TimeUnix))\nGROUP BY time, series\nORDER BY time"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "displayName": "${__field.labels.series}"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Replication delay",
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "clickhouse"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 26
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "clickhouse"
+          },
+          "editorType": "sql",
+          "format": 0,
+          "rawSql": "SELECT toStartOfInterval(TimeUnix, INTERVAL 60 SECOND) AS time, ResourceAttributes['k8s.pod.name'] AS series, max(Value) AS value\nFROM otel.otel_metrics_gauge\nWHERE MetricName = 'ClickHouseAsyncMetrics_ReplicasMaxAbsoluteDelay' AND bitAnd(Flags, 1) = 0 AND $__timeFilter(TimeUnix)\nGROUP BY time, series\nORDER BY time"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "displayName": "${__field.labels.series}"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Read-only replicas",
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "clickhouse"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 26
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "clickhouse"
+          },
+          "editorType": "sql",
+          "format": 0,
+          "rawSql": "SELECT toStartOfInterval(TimeUnix, INTERVAL 60 SECOND) AS time, ResourceAttributes['k8s.pod.name'] AS series, max(Value) AS value\nFROM otel.otel_metrics_gauge\nWHERE MetricName = 'ClickHouseMetrics_ReadonlyReplica' AND bitAnd(Flags, 1) = 0 AND $__timeFilter(TimeUnix)\nGROUP BY time, series\nORDER BY time"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "displayName": "${__field.labels.series}"
+        },
+        "overrides": []
+      },
+      "description": "A replica that lost Keeper turns read-only and refuses inserts."
+    },
+    {
+      "type": "row",
+      "title": "pg_stat_ch",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 34
+      },
+      "panels": []
+    },
+    {
+      "type": "timeseries",
+      "title": "Dropped events / min",
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "clickhouse"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 35
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "clickhouse"
+          },
+          "editorType": "sql",
+          "format": 0,
+          "rawSql": "SELECT time, series, sum(if(delta < 0, Value, delta)) AS value\nFROM (\n  SELECT toStartOfInterval(TimeUnix, INTERVAL 60 SECOND) AS time, Value, concat(concat(ResourceAttributes['k8s.namespace.name'], '/', ResourceAttributes['k8s.pod.name']), ' ', replaceOne(MetricName, 'cnpg_pg_stat_ch_', '')) AS series,\n         Value - lagInFrame(Value, 1, Value) OVER (PARTITION BY MetricName, ResourceAttributes, Attributes ORDER BY TimeUnix\n                                                  ROWS BETWEEN 1 PRECEDING AND CURRENT ROW) AS delta\n  FROM otel.otel_metrics_sum\n  WHERE MetricName IN ('cnpg_pg_stat_ch_dropped_events', 'cnpg_pg_stat_ch_dsa_oom_count', 'cnpg_pg_stat_ch_send_failures') AND bitAnd(Flags, 1) = 0 AND $__timeFilter(TimeUnix))\nGROUP BY time, series\nORDER BY time"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "displayName": "${__field.labels.series}"
+        },
+        "overrides": []
+      },
+      "description": "Events lost inside PostgreSQL: queue full, shared memory exhausted, or export failed."
+    },
+    {
+      "type": "timeseries",
+      "title": "Queue usage",
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "clickhouse"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 35
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "clickhouse"
+          },
+          "editorType": "sql",
+          "format": 0,
+          "rawSql": "SELECT toStartOfInterval(TimeUnix, INTERVAL 60 SECOND) AS time, concat(ResourceAttributes['k8s.namespace.name'], '/', ResourceAttributes['k8s.pod.name']) AS series, max(Value) AS value\nFROM otel.otel_metrics_gauge\nWHERE MetricName = 'cnpg_pg_stat_ch_queue_usage_pct' AND bitAnd(Flags, 1) = 0 AND $__timeFilter(TimeUnix)\nGROUP BY time, series\nORDER BY time"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "displayName": "${__field.labels.series}"
+        },
+        "overrides": []
+      }
+    }
+  ]
+}

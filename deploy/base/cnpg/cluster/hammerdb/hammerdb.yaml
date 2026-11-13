@@ -1,0 +1,62 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: hammerdb
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: hammerdb
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: hammerdb
+    spec:
+      initContainers:
+        - name: schema
+          image: tpcorg/hammerdb:v6.1.1-postgres
+          command: [sh, /scripts/schema.sh]
+          env: &connection
+            - {name: PGHOST, value: pg-rw}
+            - name: PGPORT
+              valueFrom: {secretKeyRef: {name: pg-app, key: port}}
+            - name: PGDATABASE
+              valueFrom: {secretKeyRef: {name: pg-app, key: dbname}}
+            - name: PGUSER
+              valueFrom: {secretKeyRef: {name: pg-app, key: username}}
+            - name: PGPASSWORD
+              valueFrom: {secretKeyRef: {name: pg-app, key: password}}
+            - {name: WAREHOUSES, value: "4"}
+            - {name: VIRTUAL_USERS, value: "25"}
+          volumeMounts: &scripts
+            - {name: scripts, mountPath: /scripts}
+          resources:
+            requests: {cpu: 200m, memory: 256Mi}
+            limits: {memory: 1Gi}
+      containers:
+        - name: hammerdb
+          image: tpcorg/hammerdb:v6.1.1-postgres
+          command: [./hammerdbcli, auto, /scripts/run.tcl]
+          env: *connection
+          # Virtual users never reconnect after a failover.
+          livenessProbe:
+            exec:
+              command:
+                - sh
+                - -c
+                - >-
+                  [ "$(psql -tAc "SELECT count(*) FROM pg_stat_activity WHERE usename = current_user
+                  AND pid <> pg_backend_pid() AND state_change > now() - interval '90 seconds'")" -gt 0 ]
+            initialDelaySeconds: 120
+            periodSeconds: 30
+            timeoutSeconds: 10
+            failureThreshold: 3
+          volumeMounts: *scripts
+          resources:
+            requests: {cpu: 200m, memory: 256Mi}
+            limits: {memory: 512Mi}
+      volumes:
+        - name: scripts
+          configMap: {name: hammerdb-scripts}

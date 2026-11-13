@@ -1,0 +1,27 @@
+pg_stat_ch:
+  query: |
+    SELECT enqueued_events, exported_events, dropped_events, send_failures, dsa_oom_count, queue_size, queue_usage_pct
+    FROM pg_stat_ch_stats()
+  target_databases: [tpcc]
+  metrics:
+    - enqueued_events:
+        usage: COUNTER
+        description: Events captured into the shared memory queue
+    - exported_events:
+        usage: COUNTER
+        description: Events sent by the background worker
+    - dropped_events:
+        usage: COUNTER
+        description: Events dropped because the queue was full
+    - send_failures:
+        usage: COUNTER
+        description: Failed export attempts
+    - dsa_oom_count:
+        usage: COUNTER
+        description: Events dropped because shared memory was exhausted
+    - queue_size:
+        usage: GAUGE
+        description: Events waiting in the queue
+    - queue_usage_pct:
+        usage: GAUGE
+        description: Queue fill percentage
