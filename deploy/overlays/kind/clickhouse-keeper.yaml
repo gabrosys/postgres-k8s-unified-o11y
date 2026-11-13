@@ -1,0 +1,6 @@
+- op: replace
+  path: /spec/configuration/clusters/0/layout/replicasCount
+  value: 1
+- op: replace
+  path: /spec/templates/volumeClaimTemplates/0/spec/resources/requests/storage
+  value: 1Gi

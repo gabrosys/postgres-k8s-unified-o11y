@@ -1,0 +1,9 @@
+postgres=ghcr.io/cloudnative-pg/postgresql:18-minimal-trixie@sha256:ec2ed3404e89fff99643901b58a2a34c46a46345fe69a3d96500b82f995c327b
+otel-collector=ghcr.io/open-telemetry/opentelemetry-collector-releases/opentelemetry-collector-contrib:0.162.0
+clickhouse=clickhouse/clickhouse-server:26.7.5.10
+grafana=grafana/grafana:13.2.0
+clickhouse-keeper=clickhouse/clickhouse-keeper:26.7.5.10
+migrate=migrate/migrate:v4.20.1
+pg-tracing-ext=localhost/pg-tracing:0.1.0-c343277
+pg-stat-ch-ext=localhost/pg-stat-ch:0.4.0
+hammerdb=tpcorg/hammerdb:v6.1.1-postgres

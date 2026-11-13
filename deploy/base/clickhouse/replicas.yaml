@@ -1,0 +1,10 @@
+source:
+  kind: ClickHouseInstallation
+  name: otel
+  fieldPath: spec.configuration.clusters.[name=otel].layout.replicasCount
+targets:
+  - select:
+      kind: Job
+      name: clickhouse-schema
+    fieldPaths:
+      - spec.template.spec.initContainers.[name=database].env.[name=CH_HOSTS].value

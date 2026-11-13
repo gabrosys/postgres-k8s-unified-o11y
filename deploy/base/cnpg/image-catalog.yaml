@@ -1,0 +1,16 @@
+apiVersion: postgresql.cnpg.io/v1
+kind: ClusterImageCatalog
+metadata:
+  name: o11y-postgres
+spec:
+  images:
+    - major: 18
+      image: ghcr.io/cloudnative-pg/postgresql:18-minimal-trixie@sha256:ec2ed3404e89fff99643901b58a2a34c46a46345fe69a3d96500b82f995c327b
+      extensions:
+        - name: pg_tracing
+          image:
+            reference: localhost/pg-tracing:0.1.0-c343277
+          ld_library_path: [system]
+        - name: pg_stat_ch
+          image:
+            reference: localhost/pg-stat-ch:0.4.0

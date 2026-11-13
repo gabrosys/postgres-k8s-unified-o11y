@@ -1,48 +1,39 @@
-.PHONY: help prereqs kind cnpg build-image clickhouse otel pg-cluster workload grafana smoke chaos-degrade chaos-restore top-queries timeline drill setup-all teardown collector-logs agent-logs ch-logs ch-client
+.PHONY: help prereqs lint kind operators images deploy smoke resilience chaos-degrade chaos-restore top-queries timeline drill setup-all teardown ch-client
 
 SHELL := /bin/bash
 SCRIPTS_DIR := scripts
-
-# Runs a command with the kubectl context and namespace pinned by _env.sh.
-kctl = @source $(SCRIPTS_DIR)/_env.sh && $(1)
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z0-9_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-16s\033[0m %s\n", $$1, $$2}'
 
 prereqs: ## Check all prerequisites are installed
-	@$(SCRIPTS_DIR)/00-prereqs-check.sh
+	@$(SCRIPTS_DIR)/prereqs.sh
+
+lint: ## Validate rendered manifests for every overlay
+	@test/lint.sh
 
 kind: ## Create KIND cluster
-	@$(SCRIPTS_DIR)/01-kind-create.sh
+	@$(SCRIPTS_DIR)/kind-create.sh
 
-cnpg: ## Install CNPG operator
-	@$(SCRIPTS_DIR)/02-install-cnpg.sh
+operators: ## Install operators from pinned Helm charts
+	@$(SCRIPTS_DIR)/install-operators.sh
 
-build-image: ## Build PG 18 image with pg_tracing + pg_stat_ch, load into KIND
-	@$(SCRIPTS_DIR)/03-build-load-image.sh
+images: ## Build the extension images, load them into KIND
+	@$(SCRIPTS_DIR)/build-images.sh
 
-clickhouse: ## Deploy ClickHouse
-	@$(SCRIPTS_DIR)/04-install-clickhouse.sh
+deploy: ## Apply the Kustomize overlay (OVERLAY, default kind) and wait for it
+	@$(SCRIPTS_DIR)/deploy.sh
 
-otel: ## Deploy the OpenTelemetry gateway collector and log agent
-	@$(SCRIPTS_DIR)/05-install-otel.sh
+smoke: ## Run every test suite except resilience
+	@test/smoke.sh
 
-pg-cluster: ## Deploy CNPG PostgreSQL cluster
-	@$(SCRIPTS_DIR)/06-deploy-pg-cluster.sh
+resilience: ## Restart and stop pipeline components under load, check nothing is lost
+	@test/resilience.sh
 
-workload: ## Build and deploy the instrumented workload client
-	@$(SCRIPTS_DIR)/07-deploy-workload.sh
-
-grafana: ## Install Grafana with the ClickHouse datasource
-	@$(SCRIPTS_DIR)/08-install-grafana.sh
-
-smoke: ## Validate the pipeline end to end
-	@$(SCRIPTS_DIR)/09-smoke.sh
-
-chaos-degrade: ## Drop the lookup index to force a plan regression
+chaos-degrade: ## Apply a planner override to every cluster
 	@$(SCRIPTS_DIR)/chaos-degrade.sh
 
-chaos-restore: ## Recreate the lookup index and re-analyze
+chaos-restore: ## Remove the planner override
 	@$(SCRIPTS_DIR)/chaos-restore.sh
 
 top-queries: ## Rank statements by total time (PG_CLUSTER, WINDOW_MIN)
@@ -57,17 +48,8 @@ drill: ## Spans + server log of TRACE_ID=<id> (or slowest trace of QUERY_ID=<id>
 setup-all: ## Run full setup
 	@$(SCRIPTS_DIR)/setup-all.sh
 
-collector-logs: ## Tail the gateway collector (blocking)
-	$(call kctl,kubectl logs -n "$$NAMESPACE" -f deployment/otel-collector)
-
-agent-logs: ## Tail the log-shipping agent (blocking)
-	$(call kctl,kubectl logs -n "$$NAMESPACE" -f daemonset/otel-agent)
-
-ch-logs: ## Tail ClickHouse (blocking)
-	$(call kctl,kubectl logs -n "$$NAMESPACE" -f statefulset/clickhouse)
-
 ch-client: ## Open an interactive clickhouse-client on the otel database
-	$(call kctl,kubectl exec -it -n "$$NAMESPACE" statefulset/clickhouse -- clickhouse-client --database otel)
+	@source $(SCRIPTS_DIR)/env.sh && kubectl exec -it -n "$$NAMESPACE" "$$(ch_pod)" -c clickhouse -- clickhouse-client --database otel
 
 teardown: ## Tear down everything
 	@$(SCRIPTS_DIR)/teardown.sh
