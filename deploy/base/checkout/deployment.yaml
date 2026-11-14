@@ -1,0 +1,52 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: checkout
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: checkout
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: checkout
+    spec:
+      initContainers:
+        - name: migrate
+          image: ghcr.io/cloudnative-pg/postgresql:18-minimal-trixie@sha256:ec2ed3404e89fff99643901b58a2a34c46a46345fe69a3d96500b82f995c327b
+          command: [sh, /scripts/migrate.sh]
+          env: &connection
+            - {name: PGHOST, value: pg-rw}
+            - name: PGPORT
+              valueFrom: {secretKeyRef: {name: pg-app, key: port}}
+            - name: PGDATABASE
+              valueFrom: {secretKeyRef: {name: pg-app, key: dbname}}
+            - name: PGUSER
+              valueFrom: {secretKeyRef: {name: pg-app, key: username}}
+            - name: PGPASSWORD
+              valueFrom: {secretKeyRef: {name: pg-app, key: password}}
+          volumeMounts:
+            - {name: migrations, mountPath: /scripts/migrate.sh, subPath: migrate.sh}
+            - {name: migrations, mountPath: /migrations}
+          resources:
+            requests: {cpu: 50m, memory: 64Mi}
+            limits: {memory: 128Mi}
+      containers:
+        - name: checkout
+          image: localhost/checkout:0.1.0
+          imagePullPolicy: Never
+          env: *connection
+          envFrom:
+            - configMapRef: {name: checkout-otel}
+          ports:
+            - {name: http, containerPort: 8080}
+          readinessProbe:
+            httpGet: {path: /healthz, port: http}
+            periodSeconds: 10
+          resources:
+            requests: {cpu: 50m, memory: 32Mi}
+            limits: {memory: 128Mi}
+      volumes:
+        - name: migrations
+          configMap: {name: checkout-migrations}

@@ -1,0 +1,19 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: pg-alpha
+resources:
+  - deployment.yaml
+  - service.yaml
+  - load.yaml
+configMapGenerator:
+  - name: checkout-migrations
+    files:
+      - migrate.sh
+      - migrations/schema.sql
+      - migrations/1.sql
+      - migrations/2.sql
+      - migrations/3.sql
+  - name: checkout-otel
+    literals:
+      - OTEL_SERVICE_NAME=checkout
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-gateway-collector.o11y.svc:4317

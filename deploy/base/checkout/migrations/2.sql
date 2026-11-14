@@ -1,0 +1,1 @@
+DROP INDEX CONCURRENTLY IF EXISTS checkout_ol_item;

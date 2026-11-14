@@ -1,0 +1,217 @@
+{
+  "uid": "pg-trace",
+  "title": "Trace",
+  "tags": [
+    "postgresql",
+    "opentelemetry"
+  ],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "refresh": "30s",
+  "time": {
+    "from": "now-30m",
+    "to": "now"
+  },
+  "templating": {
+    "list": [
+      {
+        "name": "trace_id",
+        "label": "Trace ID",
+        "type": "textbox",
+        "query": "",
+        "current": {
+          "text": "",
+          "value": ""
+        }
+      }
+    ]
+  },
+  "panels": [
+    {
+      "type": "traces",
+      "title": "Request",
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "clickhouse"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 24,
+        "h": 16
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "clickhouse"
+          },
+          "editorType": "sql",
+          "format": 3,
+          "rawSql": "WITH '$trace_id' AS tid,\n     (SELECT min(Start) FROM otel.otel_traces_trace_id_ts WHERE TraceId = tid) AS t0,\n     (SELECT max(End) + 1 FROM otel.otel_traces_trace_id_ts WHERE TraceId = tid) AS t1\nSELECT TraceId AS traceID, SpanId AS spanID, ParentSpanId AS parentSpanID,\n       ServiceName AS serviceName, SpanName AS operationName,\n       multiply(toUnixTimestamp64Nano(Timestamp), 0.000001) AS startTime,\n       multiply(Duration, 0.000001) AS duration,\n       arrayMap(k -> map('key', k, 'value', SpanAttributes[k]), mapKeys(SpanAttributes)) AS tags,\n       arrayMap(k -> map('key', k, 'value', ResourceAttributes[k]), mapKeys(ResourceAttributes)) AS serviceTags\nFROM otel.otel_traces\nWHERE TraceId = tid AND Timestamp >= t0 AND Timestamp <= t1\nORDER BY startTime",
+          "queryType": "traces"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "Paste a trace id"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "type": "table",
+      "title": "Statements in this request",
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "clickhouse"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 16,
+        "w": 24,
+        "h": 10
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "clickhouse"
+          },
+          "editorType": "sql",
+          "format": 1,
+          "rawSql": "WITH '$trace_id' AS tid,\n     (SELECT min(Start) FROM otel.otel_traces_trace_id_ts WHERE TraceId = tid) AS t0,\n     (SELECT max(End) + 1 FROM otel.otel_traces_trace_id_ts WHERE TraceId = tid) AS t1,\n     spans AS (SELECT DISTINCT ResourceAttributes['k8s.pod.name'] AS pod, SpanAttributes['backend.pid'] AS pid\n               FROM otel.otel_traces\n               WHERE TraceId = tid AND Timestamp >= t0 AND Timestamp <= t1 AND ServiceName = 'PostgreSQL_Server')\nSELECT Timestamp AS time, ResourceAttributes['k8s.pod.name'] AS pod,\n       round(toFloat64OrZero(LogAttributes['duration_us']) / 1000, 3) AS ms, LogAttributes['query_id'] AS query_id,\n       LogAttributes['err_message'] AS error, substring(replaceRegexpAll(LogAttributes['db.query.text'], '\\\\s+', ' '), 1, 200) AS statement\nFROM otel.otel_logs\nWHERE ServiceName = 'pg_stat_ch' AND Timestamp >= t0 - INTERVAL 1 SECOND AND Timestamp <= t1 + INTERVAL 1 SECOND\n  AND (ResourceAttributes['k8s.pod.name'], LogAttributes['pid']) IN (SELECT pod, pid FROM spans)\nORDER BY time"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "No statements found for this trace"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "statement"
+            },
+            "properties": [
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "auto",
+                  "wrapText": true
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "description": "Every statement the backend ran during this request, from pg_stat_ch. Server log lines exist only for statements above log_min_duration_statement."
+    },
+    {
+      "type": "timeseries",
+      "title": "This pod during this request",
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "clickhouse"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 26,
+        "w": 24,
+        "h": 10
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "clickhouse"
+          },
+          "editorType": "sql",
+          "format": 0,
+          "rawSql": "WITH '$trace_id' AS tid,\n     (SELECT min(Start) FROM otel.otel_traces_trace_id_ts WHERE TraceId = tid) AS t0,\n     (SELECT max(End) + 1 FROM otel.otel_traces_trace_id_ts WHERE TraceId = tid) AS t1,\n     (SELECT any(ResourceAttributes['k8s.pod.name']) FROM otel.otel_traces WHERE TraceId = tid AND Timestamp >= t0 AND Timestamp <= t1\n        AND ServiceName = 'PostgreSQL_Server') AS p\nSELECT time, greatest(v - lagInFrame(v, 1, v) OVER (ORDER BY time ROWS BETWEEN 1 PRECEDING AND CURRENT ROW), 0) / 60 AS cpu_cores\nFROM (SELECT toStartOfInterval(TimeUnix, INTERVAL 60 SECOND) AS time, max(Value) AS v FROM otel.otel_metrics_sum\n      WHERE MetricName = 'container_cpu_usage_seconds_total' AND Attributes['pod'] = p AND Attributes['container'] = 'postgres'\n        AND TimeUnix BETWEEN t0 - INTERVAL 120 SECOND AND t1 + INTERVAL 120 SECOND\n      GROUP BY time)\nORDER BY time"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "clickhouse"
+          },
+          "editorType": "sql",
+          "format": 0,
+          "rawSql": "WITH '$trace_id' AS tid,\n     (SELECT min(Start) FROM otel.otel_traces_trace_id_ts WHERE TraceId = tid) AS t0,\n     (SELECT max(End) + 1 FROM otel.otel_traces_trace_id_ts WHERE TraceId = tid) AS t1,\n     (SELECT any(ResourceAttributes['k8s.pod.name']) FROM otel.otel_traces WHERE TraceId = tid AND Timestamp >= t0 AND Timestamp <= t1\n        AND ServiceName = 'PostgreSQL_Server') AS p\nSELECT toStartOfInterval(Timestamp, INTERVAL 15 SECOND) AS time,\n       sum(toFloat64OrZero(LogAttributes['shared_blks_read'])) / 15 AS disk_blocks_per_sec\nFROM otel.otel_logs\nWHERE ServiceName = 'pg_stat_ch' AND ResourceAttributes['k8s.pod.name'] = p\n  AND Timestamp BETWEEN t0 - INTERVAL 120 SECOND AND t1 + INTERVAL 120 SECOND\nGROUP BY time ORDER BY time"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "No metrics for this pod"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "cpu_cores"
+            },
+            "properties": [
+              {
+                "id": "custom.axisPlacement",
+                "value": "right"
+              }
+            ]
+          }
+        ]
+      },
+      "description": "CPU of the postgres container (scraped every minute) and blocks read from disk, two minutes either side of the request."
+    },
+    {
+      "type": "table",
+      "title": "Server log of this request (slow statements and errors only)",
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "clickhouse"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 36,
+        "w": 24,
+        "h": 6
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "clickhouse"
+          },
+          "editorType": "sql",
+          "format": 1,
+          "rawSql": "WITH '$trace_id' AS tid,\n     (SELECT min(Start) FROM otel.otel_traces_trace_id_ts WHERE TraceId = tid) AS t0,\n     (SELECT max(End) + 1 FROM otel.otel_traces_trace_id_ts WHERE TraceId = tid) AS t1,\n     spans AS (SELECT ResourceAttributes['k8s.pod.name'] AS pod, SpanAttributes['backend.pid'] AS pid, SpanAttributes['query.query_id'] AS qid\n               FROM otel.otel_traces\n               WHERE TraceId = tid AND Timestamp >= t0 AND Timestamp <= t1 AND ServiceName = 'PostgreSQL_Server')\nSELECT Timestamp AS time, SeverityText AS level, ResourceAttributes['k8s.pod.name'] AS pod,\n       toFloat64OrNull(extract(JSONExtractString(Body, 'message'), 'duration: ([0-9.]+) ms')) AS ms,\n       LogAttributes['query_id'] AS query_id,\n       substring(replaceRegexpOne(JSONExtractString(Body, 'message'), '/\\\\*traceparent=.*?\\\\*/ ', ''), 1, 200) AS message\nFROM otel.otel_logs\nWHERE ServiceName = 'postgres-server-log' AND Timestamp >= t0 - INTERVAL 1 SECOND AND Timestamp <= t1 + INTERVAL 1 SECOND\n  AND (position(Body, tid) > 0\n       OR (ResourceAttributes['k8s.pod.name'], JSONExtractString(Body, 'process_id'), LogAttributes['query_id'])\n          IN (SELECT pod, pid, qid FROM spans WHERE qid NOT IN ('', '0')))\nORDER BY time"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "No log line for this request"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "message"
+            },
+            "properties": [
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "auto",
+                  "wrapText": true
+                }
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}

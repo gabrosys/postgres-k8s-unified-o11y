@@ -1,27 +1,17 @@
 #!/usr/bin/env bash
 # Cross-signal queries against ClickHouse: correlate.sh top | timeline | drill
-#   PG_CLUSTERS cluster to inspect, one name (same variable as chaos-degrade; default pg-alpha)
-#   PG_CLUSTER  alias of PG_CLUSTERS for a single cluster, wins when both are set
-#   WINDOW_MIN  look-back window in minutes   (default 10)
+#   PG_CLUSTER  namespace of the cluster to inspect (default pg-alpha)
+#   WINDOW_MIN  look-back window in minutes (default 10)
 #   QUERY_ID    required by timeline; drill uses it to pick the slowest trace
 #   TRACE_ID    drill target
 set -euo pipefail
 
-EXPLICIT_CLUSTER="${PG_CLUSTER:-}"
 die() { echo "error: $*" >&2; exit 1; }
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-source "${SCRIPT_DIR}/_env.sh"
+source "${SCRIPT_DIR}/env.sh"
 require_kind_context
-source "${SCRIPT_DIR}/_pg-env.sh"
-source "${SCRIPT_DIR}/_ch-env.sh"
 
-# One cluster per run: PG_CLUSTER wins, else the single name in PG_CLUSTERS
-# (the variable chaos-degrade reads), else the default.
-if [ -z "$EXPLICIT_CLUSTER" ] && [ -n "${PG_CLUSTERS:-}" ]; then
-  [ "${#CLUSTERS[@]}" -eq 1 ] || die "PG_CLUSTERS must name one cluster here (got '${PG_CLUSTERS}')"
-  PG_CLUSTER="${CLUSTERS[0]}"
-fi
 QUERIES_DIR="${SCRIPT_DIR}/queries"
 WINDOW_MIN="${WINDOW_MIN:-10}"
 QUERY_ID="${QUERY_ID:-}"

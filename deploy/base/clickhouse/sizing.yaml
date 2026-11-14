@@ -1,0 +1,34 @@
+apiVersion: clickhouse.altinity.com/v1
+kind: ClickHouseInstallationTemplate
+metadata:
+  name: otel-sizing
+spec:
+  defaults:
+    templates:
+      podTemplate: clickhouse
+      dataVolumeClaimTemplate: data
+  templates:
+    podTemplates:
+      - name: clickhouse
+        podDistribution:
+          - type: ShardAntiAffinity
+        spec:
+          containers:
+            - name: clickhouse
+              image: clickhouse/clickhouse-server:26.7.5.10
+              ports:
+                - name: metrics
+                  containerPort: 9363
+              resources:
+                requests:
+                  cpu: 500m
+                  memory: 2Gi
+                limits:
+                  memory: 4Gi
+    volumeClaimTemplates:
+      - name: data
+        spec:
+          accessModes: [ReadWriteOnce]
+          resources:
+            requests:
+              storage: 50Gi

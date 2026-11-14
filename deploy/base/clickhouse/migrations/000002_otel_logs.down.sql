@@ -1,0 +1,1 @@
+DROP TABLE IF EXISTS otel.otel_logs ON CLUSTER otel SYNC;
