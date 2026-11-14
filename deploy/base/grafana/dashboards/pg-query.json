@@ -147,21 +147,35 @@
           },
           "editorType": "sql",
           "format": 0,
-          "rawSql": "SELECT $__timeInterval(Timestamp) AS time, topK(1)(SpanName)[1] AS plan\nFROM otel.otel_traces\nWHERE ServiceName = 'PostgreSQL_Server' AND ResourceAttributes['k8s.namespace.name'] = '$cluster' AND SpanAttributes['query.query_id'] = '$query_id'\n  AND match(SpanName, '^\\\\w+( using \\\\S+)? on \\\\S+$') AND $__timeFilter(Timestamp)\nGROUP BY time ORDER BY time"
+          "rawSql": "SELECT $__timeInterval(Timestamp) AS time, substring(replaceRegexpOne(replaceRegexpOne(SpanName, ' (using|on) .*$', ''), '^(CTE|InitPlan|SubPlan|Worker) .*$', '\\\\1'), 1, 30) AS plan_node, 1 AS present\nFROM otel.otel_traces\nWHERE ServiceName = 'PostgreSQL_Server' AND ResourceAttributes['k8s.namespace.name'] = '$cluster' AND SpanAttributes['query.query_id'] = '$query_id'\n  AND mapContains(SpanAttributes, 'plan.cost.total') AND $__timeFilter(Timestamp)\nGROUP BY time, plan_node ORDER BY time"
         }
       ],
       "fieldConfig": {
         "defaults": {
-          "noValue": "No sampled trace"
+          "noValue": "No sampled trace",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "fillOpacity": 80,
+            "lineWidth": 0
+          },
+          "displayName": "${__field.labels.plan_node}"
         },
         "overrides": []
       },
       "options": {
         "showValue": "never",
         "mergeValues": true,
-        "rowHeight": 0.8
+        "rowHeight": 0.7,
+        "legend": {
+          "showLegend": false
+        },
+        "tooltip": {
+          "mode": "single"
+        }
       },
-      "description": "Most frequent scan node of the sampled executions in each interval."
+      "description": "One row per plan node type of the sampled traces; a bar spans the time the node was part of the plan. When the plan changes, some rows end and others start."
     },
     {
       "type": "table",
@@ -293,6 +307,39 @@
             "defaults": {},
             "overrides": []
           }
+        },
+        {
+          "type": "table",
+          "title": "All executions",
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "clickhouse"
+          },
+          "gridPos": {
+            "x": 0,
+            "y": 32,
+            "w": 24,
+            "h": 8
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "datasource": {
+                "type": "grafana-clickhouse-datasource",
+                "uid": "clickhouse"
+              },
+              "editorType": "sql",
+              "format": 1,
+              "rawSql": "SELECT Timestamp AS time, ResourceAttributes['k8s.pod.name'] AS pod,\n       round(toFloat64OrZero(LogAttributes['duration_us']) / 1000, 3) AS ms, LogAttributes['rows'] AS rows,\n       LogAttributes['shared_blks_read'] AS blks_read, LogAttributes['app'] AS app, LogAttributes['err_message'] AS error\nFROM otel.otel_logs\nWHERE ServiceName = 'pg_stat_ch' AND ResourceAttributes['k8s.namespace.name'] = '$cluster' AND LogAttributes['query_id'] = '$query_id' AND $__timeFilter(Timestamp)\nORDER BY time DESC LIMIT 100"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "noValue": "No executions in range"
+            },
+            "overrides": []
+          },
+          "description": "Every execution of this statement from pg_stat_ch, not only sampled traces."
         }
       ]
     }

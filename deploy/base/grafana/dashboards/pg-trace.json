@@ -62,7 +62,7 @@
     },
     {
       "type": "table",
-      "title": "Server log of this request",
+      "title": "Statements in this request",
       "datasource": {
         "type": "grafana-clickhouse-datasource",
         "uid": "clickhouse"
@@ -70,7 +70,7 @@
       "gridPos": {
         "x": 0,
         "y": 16,
-        "w": 12,
+        "w": 24,
         "h": 10
       },
       "targets": [
@@ -82,18 +82,18 @@
           },
           "editorType": "sql",
           "format": 1,
-          "rawSql": "WITH '$trace_id' AS tid,\n     (SELECT min(Start) FROM otel.otel_traces_trace_id_ts WHERE TraceId = tid) AS t0,\n     (SELECT max(End) + 1 FROM otel.otel_traces_trace_id_ts WHERE TraceId = tid) AS t1,\n     spans AS (SELECT ResourceAttributes['k8s.pod.name'] AS pod, SpanAttributes['backend.pid'] AS pid, SpanAttributes['query.query_id'] AS qid\n               FROM otel.otel_traces\n               WHERE TraceId = tid AND Timestamp >= t0 AND Timestamp <= t1 AND ServiceName = 'PostgreSQL_Server')\nSELECT Timestamp AS time, SeverityText AS level, ResourceAttributes['k8s.pod.name'] AS pod,\n       toFloat64OrNull(extract(JSONExtractString(Body, 'message'), 'duration: ([0-9.]+) ms')) AS ms,\n       LogAttributes['query_id'] AS query_id,\n       substring(replaceRegexpOne(JSONExtractString(Body, 'message'), '/\\\\*traceparent=.*?\\\\*/ ', ''), 1, 200) AS message\nFROM otel.otel_logs\nWHERE ServiceName = 'postgres-server-log' AND Timestamp >= t0 - INTERVAL 1 SECOND AND Timestamp <= t1 + INTERVAL 1 SECOND\n  AND (position(Body, tid) > 0\n       OR (ResourceAttributes['k8s.pod.name'], JSONExtractString(Body, 'process_id'), LogAttributes['query_id'])\n          IN (SELECT pod, pid, qid FROM spans WHERE qid NOT IN ('', '0')))\nORDER BY time"
+          "rawSql": "WITH '$trace_id' AS tid,\n     (SELECT min(Start) FROM otel.otel_traces_trace_id_ts WHERE TraceId = tid) AS t0,\n     (SELECT max(End) + 1 FROM otel.otel_traces_trace_id_ts WHERE TraceId = tid) AS t1,\n     spans AS (SELECT DISTINCT ResourceAttributes['k8s.pod.name'] AS pod, SpanAttributes['backend.pid'] AS pid\n               FROM otel.otel_traces\n               WHERE TraceId = tid AND Timestamp >= t0 AND Timestamp <= t1 AND ServiceName = 'PostgreSQL_Server')\nSELECT Timestamp AS time, ResourceAttributes['k8s.pod.name'] AS pod,\n       round(toFloat64OrZero(LogAttributes['duration_us']) / 1000, 3) AS ms, LogAttributes['query_id'] AS query_id,\n       LogAttributes['err_message'] AS error, substring(replaceRegexpAll(LogAttributes['db.query.text'], '\\\\s+', ' '), 1, 200) AS statement\nFROM otel.otel_logs\nWHERE ServiceName = 'pg_stat_ch' AND Timestamp >= t0 - INTERVAL 1 SECOND AND Timestamp <= t1 + INTERVAL 1 SECOND\n  AND (ResourceAttributes['k8s.pod.name'], LogAttributes['pid']) IN (SELECT pod, pid FROM spans)\nORDER BY time"
         }
       ],
       "fieldConfig": {
         "defaults": {
-          "noValue": "No log line for this request"
+          "noValue": "No statements found for this trace"
         },
         "overrides": [
           {
             "matcher": {
               "id": "byName",
-              "options": "message"
+              "options": "statement"
             },
             "properties": [
               {
@@ -106,7 +106,8 @@
             ]
           }
         ]
-      }
+      },
+      "description": "Every statement the backend ran during this request, from pg_stat_ch. Server log lines exist only for statements above log_min_duration_statement."
     },
     {
       "type": "timeseries",
@@ -116,9 +117,9 @@
         "uid": "clickhouse"
       },
       "gridPos": {
-        "x": 12,
-        "y": 16,
-        "w": 12,
+        "x": 0,
+        "y": 26,
+        "w": 24,
         "h": 10
       },
       "targets": [
@@ -163,6 +164,54 @@
         ]
       },
       "description": "CPU of the postgres container (scraped every minute) and blocks read from disk, two minutes either side of the request."
+    },
+    {
+      "type": "table",
+      "title": "Server log of this request (slow statements and errors only)",
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "clickhouse"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 36,
+        "w": 24,
+        "h": 6
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "clickhouse"
+          },
+          "editorType": "sql",
+          "format": 1,
+          "rawSql": "WITH '$trace_id' AS tid,\n     (SELECT min(Start) FROM otel.otel_traces_trace_id_ts WHERE TraceId = tid) AS t0,\n     (SELECT max(End) + 1 FROM otel.otel_traces_trace_id_ts WHERE TraceId = tid) AS t1,\n     spans AS (SELECT ResourceAttributes['k8s.pod.name'] AS pod, SpanAttributes['backend.pid'] AS pid, SpanAttributes['query.query_id'] AS qid\n               FROM otel.otel_traces\n               WHERE TraceId = tid AND Timestamp >= t0 AND Timestamp <= t1 AND ServiceName = 'PostgreSQL_Server')\nSELECT Timestamp AS time, SeverityText AS level, ResourceAttributes['k8s.pod.name'] AS pod,\n       toFloat64OrNull(extract(JSONExtractString(Body, 'message'), 'duration: ([0-9.]+) ms')) AS ms,\n       LogAttributes['query_id'] AS query_id,\n       substring(replaceRegexpOne(JSONExtractString(Body, 'message'), '/\\\\*traceparent=.*?\\\\*/ ', ''), 1, 200) AS message\nFROM otel.otel_logs\nWHERE ServiceName = 'postgres-server-log' AND Timestamp >= t0 - INTERVAL 1 SECOND AND Timestamp <= t1 + INTERVAL 1 SECOND\n  AND (position(Body, tid) > 0\n       OR (ResourceAttributes['k8s.pod.name'], JSONExtractString(Body, 'process_id'), LogAttributes['query_id'])\n          IN (SELECT pod, pid, qid FROM spans WHERE qid NOT IN ('', '0')))\nORDER BY time"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "No log line for this request"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "message"
+            },
+            "properties": [
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "auto",
+                  "wrapText": true
+                }
+              }
+            ]
+          }
+        ]
+      }
     }
   ]
 }
