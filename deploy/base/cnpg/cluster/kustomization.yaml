@@ -1,0 +1,19 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - cluster.yaml
+  - hammerdb/hammerdb.yaml
+configMapGenerator:
+  # Referenced by name from the Cluster, which kustomize does not rewrite.
+  - name: pg-monitoring
+    files:
+      - queries=monitoring.yaml
+    options:
+      disableNameSuffixHash: true
+      labels:
+        cnpg.io/reload: "true"
+  - name: hammerdb-scripts
+    files:
+      - hammerdb/build.tcl
+      - hammerdb/schema.sh
+      - hammerdb/run.tcl

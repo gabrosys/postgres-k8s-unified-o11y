@@ -1,0 +1,44 @@
+apiVersion: clickhouse.altinity.com/v1
+kind: ClickHouseInstallation
+metadata:
+  name: otel
+spec:
+  useTemplates:
+    - name: otel-sizing
+  configuration:
+    zookeeper:
+      keeper:
+        name: otel
+    clusters:
+      - name: otel
+        pdbMaxUnavailable: 1
+        layout:
+          shardsCount: 1
+          replicasCount: 2
+    settings:
+      prometheus/endpoint: /metrics
+      prometheus/port: 9363
+      prometheus/metrics: true
+      prometheus/events: true
+      prometheus/asynchronous_metrics: true
+    profiles:
+      grafana/readonly: 2
+      grafana/max_execution_time: 60
+      grafana/max_memory_usage: 2000000000
+      grafana/constraints/max_execution_time/max: 60
+      grafana/constraints/max_memory_usage/min: 1
+      grafana/constraints/max_memory_usage/max: 2000000000
+    users:
+      ingest/password:
+        valueFrom:
+          secretKeyRef: {name: clickhouse-credentials, key: ingest}
+      ingest/networks/ip: "::/0"
+      grafana/password:
+        valueFrom:
+          secretKeyRef: {name: clickhouse-credentials, key: grafana}
+      grafana/networks/ip: "::/0"
+      grafana/profile: grafana
+      migrate/password:
+        valueFrom:
+          secretKeyRef: {name: clickhouse-credentials, key: migrate}
+      migrate/networks/ip: "::/0"

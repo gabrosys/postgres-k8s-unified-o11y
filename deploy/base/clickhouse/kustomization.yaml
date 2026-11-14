@@ -1,0 +1,32 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: o11y
+resources:
+  - credentials.yaml
+  - keeper.yaml
+  - sizing.yaml
+  - installation.yaml
+  - schema-job.yaml
+configMapGenerator:
+  - name: clickhouse-migrations
+    files:
+      - migrations/000001_otel_traces.up.sql
+      - migrations/000001_otel_traces.down.sql
+      - migrations/000002_otel_logs.up.sql
+      - migrations/000002_otel_logs.down.sql
+      - migrations/000003_otel_metrics.up.sql
+      - migrations/000003_otel_metrics.down.sql
+  - name: clickhouse-schema-scripts
+    files:
+      - ch.sh
+      - database.sh
+      - migrate.sh
+      - retention.sh
+  - name: clickhouse-retention
+    envs:
+      - retention.env
+    options:
+      labels:
+        app.kubernetes.io/name: clickhouse-retention
+replacements:
+  - path: replicas.yaml

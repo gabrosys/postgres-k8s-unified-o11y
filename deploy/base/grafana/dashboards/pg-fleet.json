@@ -1,0 +1,259 @@
+{
+  "uid": "pg-fleet",
+  "title": "Postgres fleet",
+  "tags": [
+    "postgresql",
+    "opentelemetry"
+  ],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "refresh": "30s",
+  "time": {
+    "from": "now-30m",
+    "to": "now"
+  },
+  "templating": {
+    "list": [
+      {
+        "name": "cluster",
+        "label": "Cluster",
+        "type": "query",
+        "datasource": {
+          "type": "grafana-clickhouse-datasource",
+          "uid": "clickhouse"
+        },
+        "query": "SELECT DISTINCT ResourceAttributes['k8s.namespace.name'] FROM otel.otel_metrics_gauge\nWHERE MetricName = 'cnpg_backends_total' AND ResourceAttributes['k8s.namespace.name'] != '' AND TimeUnix > now() - INTERVAL 1 DAY",
+        "refresh": 2,
+        "multi": true,
+        "includeAll": true,
+        "sort": 1,
+        "current": {
+          "text": "All",
+          "value": "$__all"
+        }
+      }
+    ]
+  },
+  "panels": [
+    {
+      "type": "table",
+      "title": "Clusters",
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "clickhouse"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 24,
+        "h": 5
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "clickhouse"
+          },
+          "editorType": "sql",
+          "format": 1,
+          "rawSql": "SELECT c.cluster AS cluster, instances, statements_per_sec, p95_ms, max_lag_s\nFROM (SELECT ResourceAttributes['k8s.namespace.name'] AS cluster, uniqExact(ResourceAttributes['k8s.pod.name']) AS instances FROM otel.otel_metrics_gauge\n      WHERE MetricName = 'cnpg_collector_up' AND Value = 1 AND ResourceAttributes['k8s.namespace.name'] IN (${cluster:singlequote}) AND TimeUnix > now() - INTERVAL 2 MINUTE\n      GROUP BY cluster) AS c\nLEFT JOIN (SELECT ResourceAttributes['k8s.namespace.name'] AS cluster, round(count() / ($__toTime - $__fromTime), 1) AS statements_per_sec,\n                  round(quantile(0.95)(toFloat64OrZero(LogAttributes['duration_us'])) / 1000, 2) AS p95_ms\n           FROM otel.otel_logs WHERE ServiceName = 'pg_stat_ch' AND ResourceAttributes['k8s.namespace.name'] IN (${cluster:singlequote}) AND $__timeFilter(Timestamp)\n           GROUP BY cluster) AS s ON s.cluster = c.cluster\nLEFT JOIN (SELECT ResourceAttributes['k8s.namespace.name'] AS cluster, round(max(Value), 1) AS max_lag_s FROM otel.otel_metrics_gauge\n           WHERE MetricName = 'cnpg_pg_replication_lag' AND ResourceAttributes['k8s.namespace.name'] IN (${cluster:singlequote}) AND TimeUnix > now() - INTERVAL 2 MINUTE\n           GROUP BY cluster) AS l ON l.cluster = c.cluster\nORDER BY cluster"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Statement p95 per cluster",
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "clickhouse"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 5,
+        "w": 24,
+        "h": 9
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "clickhouse"
+          },
+          "editorType": "sql",
+          "format": 0,
+          "rawSql": "SELECT $__timeInterval(Timestamp) AS time, ResourceAttributes['k8s.namespace.name'] AS cluster, quantile(0.95)(toFloat64OrZero(LogAttributes['duration_us'])) / 1000 AS p95\nFROM otel.otel_logs\nWHERE ServiceName = 'pg_stat_ch' AND ResourceAttributes['k8s.namespace.name'] IN (${cluster:singlequote}) AND $__timeFilter(Timestamp)\nGROUP BY time, cluster ORDER BY time"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms",
+          "displayName": "${__field.labels.cluster}"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "type": "table",
+      "title": "Statements by total time",
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "clickhouse"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 14,
+        "w": 24,
+        "h": 10
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "clickhouse"
+          },
+          "editorType": "sql",
+          "format": 1,
+          "rawSql": "SELECT LogAttributes['query_id'] AS query_id, ResourceAttributes['k8s.namespace.name'] AS cluster,\n       substring(any(LogAttributes['db.query.text']), 1, 100) AS statement,\n       count() AS calls, round(sum(toFloat64OrZero(LogAttributes['duration_us'])) / 1e6, 1) AS total_s,\n       round(100 * sum(toFloat64OrZero(LogAttributes['duration_us'])) / sum(sum(toFloat64OrZero(LogAttributes['duration_us']))) OVER (PARTITION BY cluster), 1) AS pct_of_cluster,\n       round(quantile(0.95)(toFloat64OrZero(LogAttributes['duration_us'])) / 1000, 2) AS p95_ms\nFROM otel.otel_logs\nWHERE ServiceName = 'pg_stat_ch' AND ResourceAttributes['k8s.namespace.name'] IN (${cluster:singlequote}) AND $__timeFilter(Timestamp) AND LogAttributes['query_id'] NOT IN ('', '0')\nGROUP BY query_id, cluster ORDER BY total_s DESC LIMIT 20"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "query_id"
+            },
+            "properties": [
+              {
+                "id": "links",
+                "value": [
+                  {
+                    "title": "Open query",
+                    "url": "/d/pg-query?var-cluster=${__data.fields.cluster}&var-query_id=${__value.raw}&${__url_time_range}"
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "type": "row",
+      "title": "Details",
+      "collapsed": true,
+      "gridPos": {
+        "x": 0,
+        "y": 24,
+        "w": 24,
+        "h": 1
+      },
+      "panels": [
+        {
+          "type": "timeseries",
+          "title": "Blocks read from disk / s",
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "clickhouse"
+          },
+          "gridPos": {
+            "x": 0,
+            "y": 25,
+            "w": 8,
+            "h": 8
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "datasource": {
+                "type": "grafana-clickhouse-datasource",
+                "uid": "clickhouse"
+              },
+              "editorType": "sql",
+              "format": 0,
+              "rawSql": "SELECT $__timeInterval(Timestamp) AS time, ResourceAttributes['k8s.pod.name'] AS pod,\n       sum(toFloat64OrZero(LogAttributes['shared_blks_read'])) / $__interval_s AS blocks\nFROM otel.otel_logs\nWHERE ServiceName = 'pg_stat_ch' AND ResourceAttributes['k8s.namespace.name'] IN (${cluster:singlequote}) AND $__timeFilter(Timestamp)\nGROUP BY time, pod ORDER BY time"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "displayName": "${__field.labels.pod}"
+            },
+            "overrides": []
+          }
+        },
+        {
+          "type": "timeseries",
+          "title": "CPU cores per pod",
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "clickhouse"
+          },
+          "gridPos": {
+            "x": 8,
+            "y": 25,
+            "w": 8,
+            "h": 8
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "datasource": {
+                "type": "grafana-clickhouse-datasource",
+                "uid": "clickhouse"
+              },
+              "editorType": "sql",
+              "format": 0,
+              "rawSql": "SELECT time, pod, greatest(v - lagInFrame(v, 1, v) OVER (PARTITION BY pod ORDER BY time\n                ROWS BETWEEN 1 PRECEDING AND CURRENT ROW), 0) / 60 AS cores\nFROM (SELECT toStartOfInterval(TimeUnix, INTERVAL 60 SECOND) AS time, Attributes['pod'] AS pod, max(Value) AS v\n      FROM otel.otel_metrics_sum\n      WHERE MetricName = 'container_cpu_usage_seconds_total' AND Attributes['container'] = 'postgres'\n        AND Attributes['namespace'] IN (${cluster:singlequote}) AND $__timeFilter(TimeUnix)\n      GROUP BY time, pod)\nORDER BY time"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "displayName": "${__field.labels.pod}"
+            },
+            "overrides": []
+          }
+        },
+        {
+          "type": "timeseries",
+          "title": "Connections per pod",
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "clickhouse"
+          },
+          "gridPos": {
+            "x": 16,
+            "y": 25,
+            "w": 8,
+            "h": 8
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "datasource": {
+                "type": "grafana-clickhouse-datasource",
+                "uid": "clickhouse"
+              },
+              "editorType": "sql",
+              "format": 0,
+              "rawSql": "SELECT $__timeInterval(TimeUnix) AS time, ResourceAttributes['k8s.pod.name'] AS pod, max(Value) AS backends\nFROM (SELECT TimeUnix, ResourceAttributes, sum(Value) AS Value FROM otel.otel_metrics_gauge\n      WHERE MetricName = 'cnpg_backends_total' AND ResourceAttributes['k8s.namespace.name'] IN (${cluster:singlequote}) AND $__timeFilter(TimeUnix)\n      GROUP BY TimeUnix, ResourceAttributes)\nGROUP BY time, pod ORDER BY time"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "displayName": "${__field.labels.pod}"
+            },
+            "overrides": []
+          }
+        }
+      ]
+    }
+  ]
+}

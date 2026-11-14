@@ -1,0 +1,42 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - ../../base
+patches:
+  - path: clickhouse-keeper.yaml
+    target:
+      kind: ClickHouseKeeperInstallation
+      name: otel
+  - path: clickhouse.yaml
+    target:
+      kind: ClickHouseInstallation
+      name: otel
+  - path: clickhouse-sizing.yaml
+    target:
+      kind: ClickHouseInstallationTemplate
+      name: otel-sizing
+  - target:
+      kind: Cluster
+    patch: |
+      - op: replace
+        path: /spec/storage/size
+        value: 2Gi
+  - target:
+      kind: Service
+      name: grafana
+    patch: |
+      - op: add
+        path: /spec/type
+        value: NodePort
+      - op: add
+        path: /spec/ports/0/nodePort
+        value: 30300
+configMapGenerator:
+  - name: clickhouse-retention
+    namespace: o11y
+    behavior: replace
+    envs:
+      - retention.env
+    options:
+      labels:
+        app.kubernetes.io/name: clickhouse-retention

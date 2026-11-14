@@ -1,0 +1,21 @@
+- op: replace
+  path: /spec/configuration/profiles/grafana~1max_memory_usage
+  value: 1000000000
+- op: replace
+  path: /spec/configuration/profiles/grafana~1constraints~1max_memory_usage~1max
+  value: 1000000000
+- op: add
+  path: /spec/defaults
+  value:
+    templates:
+      serviceTemplate: nodeport
+- op: add
+  path: /spec/templates
+  value:
+    serviceTemplates:
+      - name: nodeport
+        spec:
+          type: NodePort
+          ports:
+            - {name: http, port: 8123, nodePort: 30123}
+            - {name: tcp, port: 9000, nodePort: 30900}

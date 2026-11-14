@@ -1,0 +1,8 @@
+manager:
+  createRbacPermissions: true
+admissionWebhooks:
+  certManager:
+    enabled: false
+  autoGenerateCert:
+    enabled: true
+    recreate: false

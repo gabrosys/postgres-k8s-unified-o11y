@@ -1,0 +1,335 @@
+{
+  "uid": "pg-service",
+  "title": "Service to database",
+  "tags": [
+    "postgresql",
+    "opentelemetry"
+  ],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "refresh": "30s",
+  "time": {
+    "from": "now-30m",
+    "to": "now"
+  },
+  "templating": {
+    "list": [
+      {
+        "name": "service",
+        "label": "Service",
+        "type": "query",
+        "datasource": {
+          "type": "grafana-clickhouse-datasource",
+          "uid": "clickhouse"
+        },
+        "query": "SELECT DISTINCT ServiceName FROM otel.otel_traces\nWHERE SpanKind = 'Server' AND ServiceName != 'PostgreSQL_Server' AND Timestamp > now() - INTERVAL 1 DAY",
+        "refresh": 2,
+        "multi": false,
+        "includeAll": false,
+        "sort": 1
+      }
+    ]
+  },
+  "panels": [
+    {
+      "type": "stat",
+      "title": "Requests / s",
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "clickhouse"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 8,
+        "h": 4
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "clickhouse"
+          },
+          "editorType": "sql",
+          "format": 1,
+          "rawSql": "SELECT count() / ($__toTime - $__fromTime) AS rps FROM otel.otel_traces\nWHERE ServiceName = '$service' AND SpanKind = 'Server' AND $__timeFilter(Timestamp) HAVING count() > 0"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "No instrumented service sends spans yet",
+          "unit": "reqps",
+          "decimals": 1
+        },
+        "overrides": []
+      }
+    },
+    {
+      "type": "stat",
+      "title": "p95",
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "clickhouse"
+      },
+      "gridPos": {
+        "x": 8,
+        "y": 0,
+        "w": 8,
+        "h": 4
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "clickhouse"
+          },
+          "editorType": "sql",
+          "format": 1,
+          "rawSql": "SELECT quantile(0.95)(Duration) / 1e6 AS p95 FROM otel.otel_traces\nWHERE ServiceName = '$service' AND SpanKind = 'Server' AND $__timeFilter(Timestamp) HAVING count() > 0"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "No instrumented service sends spans yet",
+          "unit": "ms",
+          "decimals": 1
+        },
+        "overrides": []
+      }
+    },
+    {
+      "type": "stat",
+      "title": "Time in database",
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "clickhouse"
+      },
+      "gridPos": {
+        "x": 16,
+        "y": 0,
+        "w": 8,
+        "h": 4
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "clickhouse"
+          },
+          "editorType": "sql",
+          "format": 1,
+          "rawSql": "WITH requests AS (SELECT TraceId, SpanId, Timestamp, Duration FROM otel.otel_traces\n                  WHERE ServiceName = '$service' AND SpanKind = 'Server' AND $__timeFilter(Timestamp)),\n     db AS (SELECT TraceId, ParentSpanId, sum(Duration) AS db_ns FROM otel.otel_traces\n            WHERE ServiceName = '$service' AND SpanKind = 'Client' AND $__timeFilter(Timestamp)\n            GROUP BY TraceId, ParentSpanId)\nSELECT sum(db.db_ns) / sum(r.Duration) AS share\nFROM requests AS r LEFT JOIN db ON db.TraceId = r.TraceId AND db.ParentSpanId = r.SpanId\nHAVING count() > 0"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "No instrumented service sends spans yet",
+          "unit": "percentunit",
+          "decimals": 0
+        },
+        "overrides": []
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Where the time goes",
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "clickhouse"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 4,
+        "w": 24,
+        "h": 9
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "clickhouse"
+          },
+          "editorType": "sql",
+          "format": 0,
+          "rawSql": "WITH requests AS (SELECT TraceId, SpanId, Timestamp, Duration FROM otel.otel_traces\n                  WHERE ServiceName = '$service' AND SpanKind = 'Server' AND $__timeFilter(Timestamp)),\n     db AS (SELECT TraceId, ParentSpanId, sum(Duration) AS db_ns FROM otel.otel_traces\n            WHERE ServiceName = '$service' AND SpanKind = 'Client' AND $__timeFilter(Timestamp)\n            GROUP BY TraceId, ParentSpanId)\nSELECT $__timeInterval(r.Timestamp) AS time,\n       avg(r.Duration - db.db_ns) / 1e6 AS app, avg(db.db_ns) / 1e6 AS database\nFROM requests AS r LEFT JOIN db ON db.TraceId = r.TraceId AND db.ParentSpanId = r.SpanId\nGROUP BY time ORDER BY time"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "No instrumented service sends spans yet",
+          "unit": "ms",
+          "custom": {
+            "stacking": {
+              "mode": "normal"
+            },
+            "fillOpacity": 40
+          }
+        },
+        "overrides": []
+      },
+      "description": "Average request time split into database client spans and everything else."
+    },
+    {
+      "type": "table",
+      "title": "Slowest requests",
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "clickhouse"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 13,
+        "w": 24,
+        "h": 10
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "clickhouse"
+          },
+          "editorType": "sql",
+          "format": 1,
+          "rawSql": "WITH requests AS (SELECT TraceId, SpanId, Timestamp, Duration FROM otel.otel_traces\n                  WHERE ServiceName = '$service' AND SpanKind = 'Server' AND $__timeFilter(Timestamp)),\n     db AS (SELECT TraceId, ParentSpanId, sum(Duration) AS db_ns FROM otel.otel_traces\n            WHERE ServiceName = '$service' AND SpanKind = 'Client' AND $__timeFilter(Timestamp)\n            GROUP BY TraceId, ParentSpanId),\n     t AS (SELECT TraceId, toUnixTimestamp64Milli(min(Timestamp)) AS ms FROM otel.otel_traces\n           WHERE ServiceName = '$service' AND $__timeFilter(Timestamp) GROUP BY TraceId)\nSELECT r.TraceId AS trace, r.Timestamp AS started, round(r.Duration / 1e6, 1) AS ms,\n       round(100 * db.db_ns / r.Duration) AS db_pct,\n       t.ms - 120000 AS from_ms, t.ms + r.Duration / 1e6 + 120000 AS to_ms\nFROM requests AS r LEFT JOIN db ON db.TraceId = r.TraceId AND db.ParentSpanId = r.SpanId\nLEFT JOIN t ON t.TraceId = r.TraceId\nORDER BY r.Duration DESC LIMIT 20"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "No instrumented service sends spans yet"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "trace"
+            },
+            "properties": [
+              {
+                "id": "links",
+                "value": [
+                  {
+                    "title": "Open trace",
+                    "url": "/d/pg-trace?var-trace_id=${__value.raw}&from=${__data.fields.from_ms}&to=${__data.fields.to_ms}"
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "from_ms|to_ms"
+            },
+            "properties": [
+              {
+                "id": "custom.hidden",
+                "value": true
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "type": "row",
+      "title": "Details",
+      "collapsed": true,
+      "gridPos": {
+        "x": 0,
+        "y": 23,
+        "w": 24,
+        "h": 1
+      },
+      "panels": [
+        {
+          "type": "timeseries",
+          "title": "Errors",
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "clickhouse"
+          },
+          "gridPos": {
+            "x": 0,
+            "y": 24,
+            "w": 8,
+            "h": 8
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "datasource": {
+                "type": "grafana-clickhouse-datasource",
+                "uid": "clickhouse"
+              },
+              "editorType": "sql",
+              "format": 0,
+              "rawSql": "SELECT $__timeInterval(Timestamp) AS time, countIf(StatusCode = 'Error') / count() AS errors\nFROM otel.otel_traces WHERE ServiceName = '$service' AND SpanKind = 'Server' AND $__timeFilter(Timestamp)\nGROUP BY time ORDER BY time"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "noValue": "No instrumented service sends spans yet",
+              "unit": "percentunit"
+            },
+            "overrides": []
+          }
+        },
+        {
+          "type": "table",
+          "title": "Statements of this service",
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "clickhouse"
+          },
+          "gridPos": {
+            "x": 8,
+            "y": 24,
+            "w": 16,
+            "h": 8
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "datasource": {
+                "type": "grafana-clickhouse-datasource",
+                "uid": "clickhouse"
+              },
+              "editorType": "sql",
+              "format": 1,
+              "rawSql": "SELECT pg.SpanAttributes['query.query_id'] AS query_id, pg.ResourceAttributes['k8s.namespace.name'] AS cluster,\n       substring(any(pg.SpanName), 1, 100) AS statement, count() AS executions,\n       round(sum(pg.Duration) / 1e9, 2) AS total_s\nFROM otel.otel_traces AS pg\nWHERE pg.ServiceName = 'PostgreSQL_Server' AND $__timeFilter(pg.Timestamp)\n  AND pg.SpanAttributes['query.query_id'] NOT IN ('', '0')\n  AND match(pg.SpanName, '^(SELECT|INSERT|UPDATE|DELETE|WITH)')\n  AND pg.TraceId IN (SELECT TraceId FROM otel.otel_traces WHERE ServiceName = '$service' AND $__timeFilter(Timestamp))\nGROUP BY query_id, cluster ORDER BY total_s DESC LIMIT 20"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "noValue": "No instrumented service sends spans yet"
+            },
+            "overrides": [
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "query_id"
+                },
+                "properties": [
+                  {
+                    "id": "links",
+                    "value": [
+                      {
+                        "title": "Open query",
+                        "url": "/d/pg-query?var-cluster=${__data.fields.cluster}&var-query_id=${__value.raw}&${__url_time_range}"
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}
