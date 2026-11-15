@@ -147,7 +147,7 @@
           },
           "editorType": "sql",
           "format": 0,
-          "rawSql": "SELECT $__timeInterval(Timestamp) AS time, substring(replaceRegexpOne(replaceRegexpOne(SpanName, ' (using|on) .*$', ''), '^(CTE|InitPlan|SubPlan|Worker) .*$', '\\\\1'), 1, 30) AS plan_node, 1 AS present\nFROM otel.otel_traces\nWHERE ServiceName = 'PostgreSQL_Server' AND ResourceAttributes['k8s.namespace.name'] = '$cluster' AND SpanAttributes['query.query_id'] = '$query_id'\n  AND mapContains(SpanAttributes, 'plan.cost.total') AND $__timeFilter(Timestamp)\nGROUP BY time, plan_node ORDER BY time"
+          "rawSql": "SELECT $__timeInterval(Timestamp) AS time, extract(SpanName, '^(CTE|InitPlan|SubPlan|Worker|[A-Za-z]+)') AS plan_node, 1 AS present\nFROM otel.otel_traces\nWHERE ServiceName = 'PostgreSQL_Server' AND ResourceAttributes['k8s.namespace.name'] = '$cluster' AND SpanAttributes['query.query_id'] = '$query_id'\n  AND mapContains(SpanAttributes, 'plan.cost.total') AND $__timeFilter(Timestamp)\nGROUP BY time, plan_node ORDER BY time"
         }
       ],
       "fieldConfig": {

@@ -39,7 +39,7 @@ chaos-degrade: ## Apply a planner override to every cluster
 chaos-restore: ## Remove the planner override
 	@$(SCRIPTS_DIR)/chaos-restore.sh
 
-incident: ## Roll out checkout v2: its migration drops the item_history index
+incident: ## Roll out checkout v2: its migration drops the checkout_ol_item index
 	@$(SCRIPTS_DIR)/incident.sh 2
 
 incident-fix: ## Roll forward to checkout v3: its migration recreates the index
